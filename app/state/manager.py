@@ -27,6 +27,11 @@ class StateManager:
         # Buttons whose SECONDARY action fired and are still held — drives the
         # secondary on_color for action_cc secondaries.
         self.secondary_pressed: set[int] = set()
+        # Buttons currently held toward a hold action (secondary, or shift ->
+        # Menu 4 as button 10): num -> (pressed_at, hold_seconds). Drives the
+        # hold progress bar (Milestone 13.5); cleared when the hold fires or
+        # the button is released.
+        self.hold_started: dict[int, tuple[float, float]] = {}
         self.settings_open = False
         self.settings_index = 0
 

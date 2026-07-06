@@ -49,6 +49,7 @@ class MenuLogic:
             and t - self._shift_down_at >= self.config["buttons"]["shift_hold_seconds"]
         ):
             self._shift_consumed = True
+            self.state.hold_started.pop(SHIFT_BUTTON, None)
             self._set_menu(4, "shift hold")
 
     # --- internals ----------------------------------------------------------
@@ -58,11 +59,14 @@ class MenuLogic:
             self._shift_down_at = t
             self._shift_consumed = False
             self.state.shift_held = True
+            self.state.hold_started[SHIFT_BUTTON] = (
+                t, self.config["buttons"]["shift_hold_seconds"])
             log.info("shift pressed")
         else:
             if self._shift_down_at is None:
                 return  # orphaned release (debounce dropped the press)
             self.state.shift_held = False
+            self.state.hold_started.pop(SHIFT_BUTTON, None)
             was_consumed = self._shift_consumed
             self._shift_down_at = None
             self._shift_consumed = False
@@ -76,6 +80,7 @@ class MenuLogic:
             if num == MENU3_COMBO_BUTTON and self._shift_down_at is not None:
                 # Shift+B5 combo: Menu 3, no B5 action, no Menu 4 timer.
                 self._shift_consumed = True
+                self.state.hold_started.pop(SHIFT_BUTTON, None)
                 self._suppressed.add(num)
                 self._set_menu(3, "shift+B5")
                 return

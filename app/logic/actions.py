@@ -54,6 +54,7 @@ class ActionLogic:
             )
             if t - pending["pressed_at"] >= hold_s:
                 del self._pending[num]
+                self.state.hold_started.pop(num, None)
                 secondary = get_secondary_action(pending["slot"])
                 log.info("B%d hold: secondary fires", num)
                 self.state.secondary_pressed.add(num)
@@ -67,10 +68,15 @@ class ActionLogic:
             return
         if get_secondary_action(slot):
             self._pending[num] = {"pressed_at": t, "slot": slot, "menu": menu}
+            hold_s = slot["secondary"].get(
+                "hold_seconds", self.config["buttons"]["secondary_hold_default_seconds"]
+            )
+            self.state.hold_started[num] = (t, hold_s)
         else:
             self._fire(menu, num, slot["primary"], role="primary")
 
     def _on_release(self, num: int) -> None:
+        self.state.hold_started.pop(num, None)
         pending = self._pending.pop(num, None)
         if pending:  # released before the hold threshold -> primary
             self._fire(pending["menu"], num, pending["slot"]["primary"], role="primary")

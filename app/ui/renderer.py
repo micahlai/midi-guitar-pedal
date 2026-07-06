@@ -31,6 +31,21 @@ STATUS_BAR_HEIGHT = 22
 FLICKER_PERIOD_S = 2.0  # primary+secondary both active -> alternate on_colors
 SCREENSHOT_PATH = "/tmp/controller-frame.png"
 
+# Hold progress bar (Milestone 13.5): starts growing this long after the
+# press and is rescaled so it still reaches the top exactly at the hold time.
+HOLD_GROW_DELAY_S = 0.2
+HOLD_BAR_COLOR = "#4E4E4E"  # light gray, behind text and status color
+
+
+def hold_progress(pressed_at: float, hold_seconds: float, now: float) -> float:
+    """0.0-1.0 fill fraction of the hold bar; 0 during the initial delay,
+    exactly 1.0 at pressed_at + hold_seconds."""
+    span = hold_seconds - HOLD_GROW_DELAY_S
+    if span <= 0:  # hold shorter than the delay: jump straight to full
+        return 1.0 if now - pressed_at >= hold_seconds else 0.0
+    fraction = (now - pressed_at - HOLD_GROW_DELAY_S) / span
+    return max(0.0, min(1.0, fraction))
+
 
 class UiRenderer:
     def __init__(self, state: StateManager):
@@ -156,6 +171,7 @@ class UiRenderer:
                 cell_h - 2 * PANEL_MARGIN,
             )
             pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), rect, border_radius=12)
+            self._draw_hold_bar(pygame, surface, rect, button_num)
 
             if button_num == 10:
                 # Shift/Menu panel: menu name with "MENU n" beneath it in the
@@ -241,6 +257,24 @@ class UiRenderer:
             if font.size(text)[0] <= max_width or size <= 16:
                 return font.render(text, True, color)
             size = max(16, int(size * 0.85))
+
+    def _draw_hold_bar(self, pygame, surface, rect, button_num) -> None:
+        """Light gray progress fill growing upward from the panel bottom while
+        a hold action is arming (buttons with a secondary, and Shift toward
+        Menu 4). Drawn right after the panel background so text/status sit on
+        top of it."""
+        started = self.state.hold_started.get(button_num)
+        if started is None:
+            return
+        fraction = hold_progress(started[0], started[1], time.monotonic())
+        fill_h = int(rect.height * fraction)
+        if fill_h <= 0:
+            return
+        fill = pygame.Rect(rect.left, rect.bottom - fill_h, rect.width, fill_h)
+        radius = 12 if fill_h >= rect.height else 0
+        pygame.draw.rect(surface, pygame.Color(HOLD_BAR_COLOR), fill,
+                         border_radius=radius,
+                         border_bottom_left_radius=12, border_bottom_right_radius=12)
 
     def _panel_image(self, asset_id, max_size):
         """Loaded + aspect-fit-scaled Surface for an asset id, or None. The

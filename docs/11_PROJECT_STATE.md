@@ -359,9 +359,26 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   by shrinking the content box); delete cleared the reference and the user's
   config was restored. 122 unit tests passing.
 
+### Milestone 13.5 — Hold UI (2026-07-06)
+- `state.hold_started[num] = (pressed_at, hold_seconds)` while a hold action
+  is arming: set by ActionLogic on press of a button WITH a secondary
+  (buttons without one show no bar — they have no hold time), and by
+  MenuLogic for Shift (as button 10, shift_hold_seconds). Cleared on
+  release, on secondary/Menu-4 fire, and on the Shift+B5 combo.
+- Renderer `hold_progress()` (pure, unit-tested): 0 for the first 0.2 s
+  (HOLD_GROW_DELAY_S), then rescaled over (hold - 0.2) so the bar tops out
+  exactly at the hold time; holds <= 0.2 s jump straight to full.
+- `_draw_hold_bar`: light gray (#4E4E4E) fill growing upward from the panel
+  bottom, drawn between the panel background and everything else (text,
+  hint, status bar), rounded bottom corners.
+- Verified on the Pi with a headless SDL-dummy render harness (physical
+  buttons still unwired): injected B1 at 50% of its 1.5 s hold and Shift at
+  50% of 2.0 s — screenshot shows both bars at exactly half height behind
+  the content. 132 unit tests passing.
+
 ## Current Milestone
 
-Milestone 13.5 — Hold UI
+Milestone 14 — BLE MIDI
 
 ## Decisions Made
 
