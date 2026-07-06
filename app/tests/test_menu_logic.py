@@ -14,7 +14,7 @@ class MenuLogicTest(unittest.TestCase):
         self.actions = []
         self.logic = MenuLogic(
             config, self.state,
-            on_action_event=lambda num, kind: self.actions.append((num, kind)),
+            on_action_event=lambda num, kind, t: self.actions.append((num, kind)),
         )
 
     def press(self, num, t):
@@ -72,16 +72,6 @@ class MenuLogicTest(unittest.TestCase):
         self.press(3, 0.0)
         self.release(3, 0.2)
         self.assertEqual(self.actions, [(3, "press"), (3, "release")])
-
-    def test_hold_threshold_fires_once(self):
-        self.press(7, 0.0)
-        self.logic.tick(1.0)
-        self.assertEqual(self.actions, [(7, "press")])
-        self.logic.tick(1.6)
-        self.logic.tick(2.0)
-        self.assertEqual(self.actions, [(7, "press"), (7, "hold")])
-        self.release(7, 2.5)
-        self.assertEqual(self.actions[-1], (7, "release"))
 
     def test_shift_state_tracked(self):
         self.press(10, 0.0)

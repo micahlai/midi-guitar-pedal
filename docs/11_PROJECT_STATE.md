@@ -143,9 +143,49 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
 - Pending: physical buttons (Milestone 3 wiring issue) to fire real actions;
   pot movement on screen.
 
+### Milestone 8 — MIDI Receive and State Sync (2026-07-05)
+- Engine opens the f_midi input with a callback; CC/PC messages flow into the
+  main event queue (now tagged: ("button", ...) / ("midi", msg)).
+- `logic/midi_in.py`: incoming CC updates effect_states[(channel, cc)] for
+  CCs that some effect_cc assignment listens to (0=off, >0=on); incoming PC
+  stores the global current program.
+- VERIFIED END TO END over USB: Mac (mido venv) sent CC21/CC22/PC/CC22=0 to
+  "Pi MIDI Foot Controller"; journal logged each; screenshot showed DRIVE bar
+  green, DELAY back off, LEAD bar active.
+
+### Milestone 9 — Action Types (2026-07-05)
+- All five primary types dispatch in `logic/actions.py` (shared for primary
+  and secondary): effect_cc/action_cc send CC 127, program_change sends PC,
+  expression_pedal selects the pot mode, nothing is inert.
+- Note-style CC naming (F#3) deferred to the web app UI (display concern).
+
+### Milestone 10 — Secondary Hold Actions (2026-07-05)
+- Hold timing moved from MenuLogic into ActionLogic (per-slot hold_seconds,
+  default 1.5 s). With a secondary: primary defers; quick release fires
+  primary, hold fires secondary once and release is inert.
+- expression_mode is now (menu_id, button_num, "primary"|"secondary") so a
+  secondary expression assignment can be the active pot mode.
+- Demo config: B1 DRIVE gained a secondary program_change "SOLO" (hold 1.5 s);
+  UI "Hold for SOLO" hint verified by screenshot. Pi config.json regenerated.
+- 39 unit tests passing.
+
+### Post-M10 adjustments (2026-07-05, user-directed)
+- Shift panel shows the current program ("PGM n", raw 0-127) under the menu
+  number, updated only from incoming PC.
+- effect_cc and action_cc now SEND MIDI NOTES (note_on velocity 127); the
+  cc_number field holds the note number (MainStage-style mapping).
+  expression_pedal still sends CC (continuous).
+- Feedback accepted as CC or notes interchangeably: note_off / velocity 0 /
+  CC 0 = off, anything else = on. Buttons remain fire-and-forget; ALL state
+  comes from incoming MIDI regardless of source.
+- Verified live against a running MainStage session over USB (note echoes,
+  CC 11, PCs all tracked). 48 unit tests passing.
+- NOTE: every incoming message is logged at INFO; a busy DAW session makes
+  the journal chatty — consider demoting "MIDI in" to DEBUG after bring-up.
+
 ## Current Milestone
 
-Milestone 8 — MIDI Receive and State Sync
+Milestone 11 — Web App Basics
 
 ## Decisions Made
 

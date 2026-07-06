@@ -7,8 +7,9 @@ updates the StateManager. Per docs/06_BUTTON_MENU_LOGIC_SPEC.md:
 - B10 held for shift_hold_seconds: open Menu 4 (release then does nothing).
 - B10 held + B5 press: open Menu 3; B5's own action is suppressed, including
   its release, and the shift hold timer is cancelled.
-- B1-B9: press / release / held-threshold-reached events (actions attach in
-  later milestones; for now they are logged and handed to on_action_event).
+- B1-B9: press/release events (with timestamps) are handed to
+  on_action_event; hold timing lives in logic/actions.py because secondary
+  hold thresholds are per-slot.
 
 Times are time.monotonic() seconds; tests pass synthetic values.
 """
@@ -25,15 +26,12 @@ class MenuLogic:
     def __init__(self, config: dict, state, on_action_event=None):
         self.state = state
         self.shift_hold_seconds = config["buttons"]["shift_hold_seconds"]
-        self.hold_seconds = config["buttons"]["secondary_hold_default_seconds"]
-        # Called with (button_num, "press"|"release"|"hold") for assignable
-        # buttons that are not suppressed; later milestones map these to actions.
-        self.on_action_event = on_action_event or (lambda num, kind: None)
+        # Called with (button_num, "press"|"release", t) for assignable
+        # buttons that are not suppressed; logic/actions.py maps these to actions.
+        self.on_action_event = on_action_event or (lambda num, kind, t: None)
 
         self._shift_down_at: float | None = None
         self._shift_consumed = False
-        self._pressed_at: dict[int, float] = {}
-        self._hold_fired: set[int] = set()
         self._suppressed: set[int] = set()
 
     def handle_event(self, event: tuple) -> None:
@@ -52,17 +50,6 @@ class MenuLogic:
         ):
             self._shift_consumed = True
             self._set_menu(4, "shift hold")
-
-        # Held-threshold event for assignable buttons.
-        for num, pressed_at in self._pressed_at.items():
-            if (
-                num not in self._hold_fired
-                and num not in self._suppressed
-                and t - pressed_at >= self.hold_seconds
-            ):
-                self._hold_fired.add(num)
-                log.info("B%d hold threshold reached", num)
-                self.on_action_event(num, "hold")
 
     # --- internals ----------------------------------------------------------
 
@@ -92,17 +79,14 @@ class MenuLogic:
                 self._suppressed.add(num)
                 self._set_menu(3, "shift+B5")
                 return
-            self._pressed_at[num] = t
             log.info("B%d pressed", num)
-            self.on_action_event(num, "press")
+            self.on_action_event(num, "press", t)
         else:
-            self._pressed_at.pop(num, None)
-            self._hold_fired.discard(num)
             if num in self._suppressed:
                 self._suppressed.discard(num)
                 return
             log.info("B%d released", num)
-            self.on_action_event(num, "release")
+            self.on_action_event(num, "release", t)
 
     def _set_menu(self, menu: int, reason: str) -> None:
         if self.state.current_menu != menu:

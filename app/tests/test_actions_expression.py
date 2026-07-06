@@ -15,6 +15,9 @@ class FakeMidi:
     def send_cc(self, channel, cc, value):
         self.sent.append(("cc", channel, cc, value))
 
+    def send_note(self, channel, note, velocity=127):
+        self.sent.append(("note", channel, note, velocity))
+
     def send_program_change(self, channel, program):
         self.sent.append(("pc", channel, program))
 
@@ -27,32 +30,59 @@ class ActionLogicTest(unittest.TestCase):
         self.expression = ExpressionLogic(self.config, self.state, self.midi)
         self.logic = ActionLogic(self.config, self.state, self.midi, self.expression)
 
-    def test_effect_cc_sends_127_on_press(self):
-        self.logic.on_button_event(1, "press")  # DRIVE, cc 21
-        self.assertEqual(self.midi.sent, [("cc", 1, 21, 127)])
-
     def test_action_cc_sends_and_tracks_pressed(self):
-        self.logic.on_button_event(3, "press")  # TAP, cc 23
-        self.assertEqual(self.midi.sent, [("cc", 1, 23, 127)])
+        self.logic.on_button_event(3, "press", 0.0)  # TAP, cc 23
+        self.assertEqual(self.midi.sent, [("note", 1, 23, 127)])
         self.assertIn(3, self.state.pressed_buttons)
-        self.logic.on_button_event(3, "release")
+        self.logic.on_button_event(3, "release", 0.2)
         self.assertNotIn(3, self.state.pressed_buttons)
         self.assertEqual(len(self.midi.sent), 1)  # release sends nothing
 
     def test_program_change_sends_pc(self):
-        self.logic.on_button_event(5, "press")  # LEAD, program 1
-        self.assertEqual(self.midi.sent, [("pc", 1, 1)])
+        self.logic.on_button_event(5, "press", 0.0)  # LEAD, program 2
+        self.assertEqual(self.midi.sent, [("pc", 1, 2)])
 
     def test_expression_button_sets_mode_no_midi(self):
-        self.logic.on_button_event(6, "press")  # VOLUME
-        self.assertEqual(self.state.expression_mode, (1, 6))
+        self.logic.on_button_event(6, "press", 0.0)  # VOLUME
+        self.assertEqual(self.state.expression_mode, (1, 6, "primary"))
         self.assertEqual(self.midi.sent, [])
 
     def test_nothing_and_unassigned_send_nothing(self):
-        self.logic.on_button_event(8, "press")  # nothing
+        self.logic.on_button_event(8, "press", 0.0)  # nothing
         self.state.current_menu = 2
-        self.logic.on_button_event(1, "press")  # menu 2 empty
+        self.logic.on_button_event(1, "press", 0.0)  # menu 2 empty
         self.assertEqual(self.midi.sent, [])
+
+    # --- Milestone 10: secondary hold semantics (B1 = DRIVE + SOLO secondary)
+
+    def test_primary_with_secondary_waits_and_fires_on_quick_release(self):
+        self.logic.on_button_event(1, "press", 0.0)
+        self.assertEqual(self.midi.sent, [])  # waits for release
+        self.logic.tick(0.5)
+        self.assertEqual(self.midi.sent, [])
+        self.logic.on_button_event(1, "release", 1.0)  # before 1.5s threshold
+        self.assertEqual(self.midi.sent, [("note", 1, 21, 127)])  # primary DRIVE
+
+    def test_secondary_fires_on_hold_and_release_is_inert(self):
+        self.logic.on_button_event(1, "press", 0.0)
+        self.logic.tick(1.5)
+        self.assertEqual(self.midi.sent, [("pc", 1, 3)])  # secondary SOLO
+        self.logic.tick(2.0)  # does not refire
+        self.logic.on_button_event(1, "release", 2.5)  # no primary
+        self.assertEqual(self.midi.sent, [("pc", 1, 3)])
+
+    def test_primary_without_secondary_fires_immediately(self):
+        self.logic.on_button_event(2, "press", 0.0)  # DELAY, no secondary
+        self.assertEqual(self.midi.sent, [("note", 1, 22, 127)])
+
+    def test_per_slot_hold_threshold(self):
+        slot = self.config["menus"][0]["slots"]["1"]
+        slot["secondary"]["hold_seconds"] = 3.0
+        self.logic.on_button_event(1, "press", 0.0)
+        self.logic.tick(2.0)  # past default 1.5 but below slot's 3.0
+        self.assertEqual(self.midi.sent, [])
+        self.logic.tick(3.0)
+        self.assertEqual(self.midi.sent, [("pc", 1, 3)])
 
 
 class MapValueTest(unittest.TestCase):
@@ -85,7 +115,7 @@ class ExpressionLogicTest(unittest.TestCase):
         self.logic = ExpressionLogic(self.config, self.state, self.midi)
 
     def test_pot_sends_cc_with_deadband(self):
-        self.state.expression_mode = (1, 6)  # VOLUME cc 7
+        self.state.expression_mode = (1, 6, "primary")  # VOLUME cc 7
         self.state.expression_value = 0.5
         self.logic.tick(0.0)
         self.assertEqual(self.midi.sent, [("cc", 1, 7, 64)])
@@ -98,18 +128,18 @@ class ExpressionLogicTest(unittest.TestCase):
     def test_no_send_without_mode_or_detection(self):
         self.state.expression_value = 0.7
         self.logic.tick(0.0)
-        self.state.expression_mode = (1, 6)
+        self.state.expression_mode = (1, 6, "primary")
         self.state.expression_detected = False
         self.logic.tick(0.1)
         self.assertEqual(self.midi.sent, [])
 
     def test_home_return_walks_cc_back(self):
         # Activate WAH (has_home, home 0), move pot, then switch to VOLUME.
-        self.state.expression_mode = (1, 7)  # WAH cc 11
+        self.state.expression_mode = (1, 7, "primary")  # WAH cc 11
         self.state.expression_value = 1.0
         self.logic.tick(0.0)
         self.assertEqual(self.midi.sent[-1], ("cc", 1, 11, 127))
-        self.logic.set_mode((1, 6))
+        self.logic.set_mode((1, 6, "primary"))
         # Pot still at 1.0 -> VOLUME sends immediately; WAH returns over ticks.
         t = 0.0
         for _ in range(200):

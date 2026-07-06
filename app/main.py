@@ -18,6 +18,7 @@ from hardware.constants import BUTTON_NUM_POWER
 from logic.actions import ActionLogic
 from logic.expression import ExpressionLogic
 from logic.menu import MenuLogic
+from logic.midi_in import MidiInLogic
 from logic.power import PowerLogic
 from logic.settings import SettingsLogic
 from midi.engine import MidiEngine
@@ -48,15 +49,16 @@ def main() -> int:
     log.info("config version %d loaded for %s", config["version"], config["device"]["name"])
 
     state = StateManager(config)
-    midi = MidiEngine(state, config)
+    # The queue carries ("button", (num, kind, t)) and ("midi", message).
+    events: queue.Queue = queue.Queue()
+    midi = MidiEngine(state, config, on_message=lambda msg: events.put(("midi", msg)))
     ui = UiRenderer(state)
     web = WebServer(state)
 
     for module in (midi, ui, web):
         module.start()
 
-    events: queue.Queue = queue.Queue()
-    buttons = ButtonReader(config, events.put)
+    buttons = ButtonReader(config, lambda ev: events.put(("button", ev)))
     buttons.start()
     expression_input = ExpressionInput(config, state)
     expression_input.start()
@@ -66,6 +68,7 @@ def main() -> int:
     menu_logic = MenuLogic(config, state, on_action_event=action_logic.on_button_event)
     power_logic = PowerLogic(config, state)
     settings_logic = SettingsLogic(state)
+    midi_in_logic = MidiInLogic(config, state)
 
     running = True
 
@@ -86,15 +89,19 @@ def main() -> int:
         except queue.Empty:
             event = None
         if event is not None:
-            if event[0] == BUTTON_NUM_POWER:
-                power_logic.handle_event(event)
+            source, payload = event
+            if source == "midi":
+                midi_in_logic.handle_message(payload)
+            elif payload[0] == BUTTON_NUM_POWER:
+                power_logic.handle_event(payload)
             elif state.settings_open:
-                settings_logic.handle_event(event)
+                settings_logic.handle_event(payload)
             else:
-                menu_logic.handle_event(event)
+                menu_logic.handle_event(payload)
         now = time.monotonic()
         menu_logic.tick(now)
         power_logic.tick(now)
+        action_logic.tick(now)
         expression_logic.tick(now)
         if now >= next_heartbeat:
             log.info("heartbeat: menu %d", state.current_menu)

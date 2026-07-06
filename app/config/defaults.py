@@ -52,11 +52,23 @@ DEFAULT_CONFIG = {
             # Demo assignments exercising every action type; all editable via
             # config.json (and the web app in later milestones).
             "slots": {
-                "1": {"primary": {
-                    "type": "effect_cc", "midi_channel": 1, "cc_number": 21,
-                    "off_color": "#303030", "on_color": "#00FF66",
-                    "label": "DRIVE", "image_asset_id": None,
-                }},
+                "1": {
+                    "primary": {
+                        "type": "effect_cc", "midi_channel": 1, "cc_number": 21,
+                        "off_color": "#303030", "on_color": "#00FF66",
+                        "label": "DRIVE", "image_asset_id": None,
+                    },
+                    "secondary": {
+                        "enabled": True,
+                        "hold_seconds": 1.5,
+                        "action": {
+                            "type": "program_change", "midi_channel": 1,
+                            "program_number": 3,
+                            "inactive_color": "#303030", "active_color": "#3399FF",
+                            "label": "SOLO",
+                        },
+                    },
+                },
                 "2": {"primary": {
                     "type": "effect_cc", "midi_channel": 1, "cc_number": 22,
                     "off_color": "#303030", "on_color": "#00CCFF",
@@ -68,12 +80,12 @@ DEFAULT_CONFIG = {
                     "label": "TAP", "image_asset_id": None,
                 }},
                 "4": {"primary": {
-                    "type": "program_change", "midi_channel": 1, "program_number": 0,
+                    "type": "program_change", "midi_channel": 1, "program_number": 1,
                     "inactive_color": "#303030", "active_color": "#3399FF",
                     "label": "RHYTHM", "image_asset_id": None,
                 }},
                 "5": {"primary": {
-                    "type": "program_change", "midi_channel": 1, "program_number": 1,
+                    "type": "program_change", "midi_channel": 1, "program_number": 2,
                     "inactive_color": "#303030", "active_color": "#3399FF",
                     "label": "LEAD", "image_asset_id": None,
                 }},

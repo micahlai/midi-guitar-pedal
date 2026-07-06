@@ -144,7 +144,14 @@ class UiRenderer:
             if button_num == 10:
                 # Shift/Menu panel: shows menu state, never a user assignment.
                 text = font_big.render(f"MENU {self.state.current_menu}", True, pygame.Color(theme["text"]))
-                surface.blit(text, text.get_rect(center=rect.center))
+                surface.blit(text, text.get_rect(centerx=rect.centerx, centery=rect.centery - 24))
+                # Debug: current program (raw 0-127) as received via MIDI.
+                program = self.state.current_program
+                pgm = font_small.render(
+                    f"PGM {'—' if program is None else program}", True,
+                    pygame.Color(theme["disabled"]),
+                )
+                surface.blit(pgm, pgm.get_rect(centerx=rect.centerx, centery=rect.centery + 36))
                 if self.state.shift_held:
                     pygame.draw.rect(surface, pygame.Color(theme["text"]), rect, width=4, border_radius=12)
             else:
@@ -194,7 +201,8 @@ class UiRenderer:
             active = state.current_program == primary["program_number"]
             return primary["active_color"] if active else primary["inactive_color"]
         if kind == "expression_pedal":
-            active = state.expression_mode == (state.current_menu, button_num)
+            active = (state.expression_mode is not None
+                      and state.expression_mode[:2] == (state.current_menu, button_num))
             return primary["color"] if active else theme["disabled"]
         return primary.get("color") or theme["disabled"]  # nothing
 
