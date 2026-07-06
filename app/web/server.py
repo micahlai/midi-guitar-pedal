@@ -198,12 +198,29 @@ def set_menu_name(config: dict, menu_id, name) -> dict:
     return {"menu_id": menu_id, "name": menu["name"]}
 
 
-def set_palette(config: dict, colors) -> list:
-    if not isinstance(colors, list) or len(colors) != PALETTE_SIZE:
-        raise ValueError(f"colors must be a list of {PALETTE_SIZE} #RRGGBB values")
-    palette = [_color(c, f"colors[{i}]", allow_palette=False) for i, c in enumerate(colors)]
-    config["ui"]["color_palette"] = palette
-    return palette
+MAX_PALETTE_LABEL_LENGTH = 20
+
+
+def set_palette(config: dict, colors=None, labels=None) -> dict:
+    """Update the palette colors and/or their labels; returns both lists.
+    Both live in the config, so presets snapshot them automatically."""
+    if colors is None and labels is None:
+        raise ValueError("provide colors and/or labels")
+    if colors is not None:
+        if not isinstance(colors, list) or len(colors) != PALETTE_SIZE:
+            raise ValueError(f"colors must be a list of {PALETTE_SIZE} #RRGGBB values")
+        config["ui"]["color_palette"] = [
+            _color(c, f"colors[{i}]", allow_palette=False) for i, c in enumerate(colors)
+        ]
+    if labels is not None:
+        if (not isinstance(labels, list) or len(labels) != PALETTE_SIZE
+                or not all(isinstance(l, str) for l in labels)):
+            raise ValueError(f"labels must be a list of {PALETTE_SIZE} strings")
+        config["ui"]["color_palette_labels"] = [
+            l.strip()[:MAX_PALETTE_LABEL_LENGTH] for l in labels
+        ]
+    return {"colors": config["ui"]["color_palette"],
+            "labels": config["ui"]["color_palette_labels"]}
 
 
 def install_config(state: StateManager, new_config: dict) -> None:
@@ -466,9 +483,8 @@ class WebServer:
         return result
 
     def edit_palette(self, payload: dict) -> dict:
-        result = self._mutate(
-            lambda: {"palette": set_palette(self.state.config, payload.get("colors"))}
-        )
+        result = self._mutate(lambda: {"palette": set_palette(
+            self.state.config, payload.get("colors"), payload.get("labels"))})
         log.info("web edit: palette updated")
         return result
 

@@ -713,7 +713,7 @@ function colorPicker(n, role, key, action) {
   sw.style.background = resolveColor(value);
   const text = document.createElement("span");
   text.textContent = isPalette
-    ? `Palette ${parseInt(String(value).slice(8), 10) + 1}` : value;
+    ? paletteLabel(parseInt(String(value).slice(8), 10)) : value;
   current.append(sw, text);
   wrap.appendChild(current);
 
@@ -726,7 +726,7 @@ function colorPicker(n, role, key, action) {
     const b = document.createElement("button");
     b.className = value === `palette:${i}` ? "active" : "";
     b.style.background = hex;
-    b.title = `Palette ${i + 1} (${hex}) — linked`;
+    b.title = `${paletteLabel(i)} (${hex}) — linked`;
     b.onclick = e => { e.preventDefault(); setField(n, role, key, `palette:${i}`, true); };
     grid.appendChild(b);
   });
@@ -942,23 +942,46 @@ function removeSecondary(n) {
 
 /* ---------- palette tab ---------- */
 
+function paletteLabel(i) {
+  const labels = config.ui.color_palette_labels || [];
+  return (labels[i] || "").trim() || `Palette ${i + 1}`;
+}
+
+async function savePalette(patch) {
+  try {
+    const data = await api("/api/palette", patch);
+    config.ui.color_palette = data.palette.colors;
+    config.ui.color_palette_labels = data.palette.labels;
+    setStatus("saved", "ok");
+  } catch (err) { setStatus("palette: " + err.message, "err"); }
+}
+
 function renderPalette() {
   const grid = $("palette-grid");
   grid.innerHTML = "";
   config.ui.color_palette.forEach((hex, i) => {
-    const input = document.createElement("input");
-    input.type = "color";
-    input.value = hex;
-    input.onchange = async () => {
+    const slot = document.createElement("div");
+    const color = document.createElement("input");
+    color.type = "color";
+    color.value = hex;
+    color.onchange = () => {
       const colors = [...config.ui.color_palette];
-      colors[i] = input.value.toUpperCase();
-      try {
-        const data = await api("/api/palette", { colors });
-        config.ui.color_palette = data.palette;
-        setStatus("saved", "ok");
-      } catch (err) { setStatus("palette: " + err.message, "err"); }
+      colors[i] = color.value.toUpperCase();
+      savePalette({ colors });
     };
-    grid.appendChild(field(`Palette ${i + 1}`, input));
+    slot.appendChild(field(`Palette ${i + 1}`, color));
+    const label = document.createElement("input");
+    label.type = "text";
+    label.maxLength = 20;
+    label.placeholder = `Palette ${i + 1}`;
+    label.value = (config.ui.color_palette_labels || [])[i] || "";
+    label.onchange = () => {
+      const labels = [...(config.ui.color_palette_labels || Array(10).fill(""))];
+      labels[i] = label.value;
+      savePalette({ labels });
+    };
+    slot.appendChild(field("Label", label));
+    grid.appendChild(slot);
   });
 }
 

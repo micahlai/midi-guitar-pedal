@@ -53,8 +53,19 @@ class PaletteValidationTest(unittest.TestCase):
     def test_set_palette(self):
         config = default_config()
         colors = ["#000001"] * 10
-        self.assertEqual(set_palette(config, colors), colors)
+        result = set_palette(config, colors)
+        self.assertEqual(result["colors"], colors)
         self.assertEqual(config["ui"]["color_palette"], colors)
+
+    def test_set_palette_labels(self):
+        config = default_config()
+        labels = ["  Drive  ", "x" * 30] + [""] * 8
+        result = set_palette(config, labels=labels)
+        self.assertEqual(result["labels"][0], "Drive")
+        self.assertEqual(result["labels"][1], "x" * 20)  # trimmed + capped
+        self.assertEqual(config["ui"]["color_palette_labels"], result["labels"])
+        # Colors untouched when only labels are sent.
+        self.assertEqual(result["colors"], default_config()["ui"]["color_palette"])
 
     def test_set_palette_rejects_wrong_shape(self):
         config = default_config()
@@ -62,6 +73,12 @@ class PaletteValidationTest(unittest.TestCase):
             set_palette(config, ["#000001"] * 9)
         with self.assertRaises(ValueError):
             set_palette(config, ["#000001"] * 9 + ["palette:1"])
+        with self.assertRaises(ValueError):
+            set_palette(config, labels=["ok"] * 9)
+        with self.assertRaises(ValueError):
+            set_palette(config, labels=["ok"] * 9 + [7])
+        with self.assertRaises(ValueError):
+            set_palette(config)
 
 
 class MenuNameTest(unittest.TestCase):

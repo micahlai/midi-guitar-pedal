@@ -417,6 +417,13 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   MainStage/Logic convention C3 = 60 (e.g. 66 -> F#3), live while typing;
   input stays numeric. "Use next available: N (name)" button now shows at
   ALL times (was only inside the duplicate warning).
+- Palette slots gained LABELS: `ui.color_palette_labels` (10 strings, max 20
+  chars, empty -> UI falls back to "Palette N"; back-filled on old configs/
+  presets by _fill_missing, and included in preset files since presets
+  snapshot the whole config). Edited on the Palette tab (label input under
+  each color); the menu editor's color picker shows the label on the
+  current-color button and in swatch tooltips. `/api/palette` now takes
+  {colors?, labels?} and returns both.
 - NOT yet verified in a browser — the Pi was powered off when this landed;
   JS syntax node-checked only. Deploy + click through on next power-up.
 

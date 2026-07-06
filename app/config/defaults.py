@@ -21,6 +21,9 @@ DEFAULT_CONFIG = {
             "#00FF66", "#00CCFF", "#FF6600", "#3399FF", "#FFCC00",
             "#CC66FF", "#FF3355", "#66FF99", "#FFFFFF", "#303030",
         ],
+        # Optional user labels per palette slot (shown in the editor's color
+        # pickers); empty string -> the UI falls back to "Palette N".
+        "color_palette_labels": ["", "", "", "", "", "", "", "", "", ""],
         "theme": {
             "background": "#050505",
             "panel_background": "#111111",
