@@ -1,0 +1,17 @@
+[Unit]
+Description=Boot splash on the framebuffer
+# Runs as early as possible: no default ordering, only the root fs (for the
+# pre-rendered pixels) and the framebuffer device (polled in ExecStart —
+# fb0 appears when the vc4 module loads, a few seconds into boot).
+DefaultDependencies=no
+After=local-fs.target
+Before=basic.target
+ConditionPathExists=/opt/midi-controller/assets/splash.fb
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for i in $(seq 1 150); do [ -e /dev/fb0 ] && break; sleep 0.1; done; cat /opt/midi-controller/assets/splash.fb > /dev/fb0'
+
+[Install]
+WantedBy=sysinit.target

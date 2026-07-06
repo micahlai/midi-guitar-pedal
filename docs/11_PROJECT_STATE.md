@@ -578,6 +578,26 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   rendered boot frame shows artwork + messages + v1.0.0. NOT yet seen on
   the Pi (powered off) — verify on next power-up boot.
 
+### Post-M16 — silent boot + early framebuffer splash (2026-07-06, PREPARED,
+### not yet applied — Pi was off)
+- Goal: artwork on screen for the whole Pi boot, terminal text never shown.
+- `scripts/render-splash-fb.py`: pre-renders loading_screen.jpg into raw
+  /dev/fb0 pixels (splash.fb) matching the live fb geometry from sysfs
+  (32 bpp BGRX and 16 bpp RGB565 paths, stride padding). Tested locally
+  against a fake sysfs at both depths incl. byte-exact round-trip.
+- `systemd/boot-splash.service`: DefaultDependencies=no oneshot, polls for
+  /dev/fb0 (vc4 loads a few seconds into boot) then cats splash.fb into it.
+  Installed by deploy.sh; needs `systemctl enable` (setup script does it).
+- `scripts/setup-boot-splash.sh` (run ON the Pi, idempotent, backs up
+  cmdline.txt): adds quiet/loglevel=3/logo.nologo/vt.global_cursor_off=1,
+  moves console tty1->tty3, disable_splash=1 in config.txt, renders
+  splash.fb, enables boot-splash.service, disables getty@tty1.
+- **TO APPLY on next power-up**: `./deploy.sh` then
+  `ssh pedal 'bash /opt/midi-controller/scripts/setup-boot-splash.sh'`,
+  reboot and watch: no rainbow, black -> artwork within a few seconds ->
+  app boot screen (same artwork + messages) -> UI. Verify nothing regressed
+  in the app itself. Revert notes are in the setup script header.
+
 ## Current Milestone
 
 All roadmap milestones through 16 complete. Next up: user hardware bring-up
