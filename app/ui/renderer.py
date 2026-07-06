@@ -15,6 +15,7 @@ import threading
 import time
 
 from config.model import get_primary, get_secondary_action, get_slot, resolve_color
+from web.images import image_path
 from hardware.constants import DISPLAY_HEIGHT, DISPLAY_WIDTH
 from logic.settings import SETTINGS_ITEMS
 from state.manager import StateManager
@@ -39,6 +40,11 @@ class UiRenderer:
         self.screenshot_requested = False
         self._pygame = None  # set once the render thread imports pygame
         self._font_cache: dict[int, object] = {}
+        # asset_id -> loaded Surface (None = load failed/missing; new uploads
+        # always get fresh ids so entries never go stale).
+        self._image_cache: dict[str, object] = {}
+        # (asset_id, w, h) -> scaled Surface for the last-used target size.
+        self._scaled_cache: dict[tuple, object] = {}
 
     @property
     def theme(self) -> dict:
@@ -181,14 +187,30 @@ class UiRenderer:
         primary = get_primary(self.state.config, self.state.current_menu, button_num)
         slot = get_slot(self.state.config, self.state.current_menu, button_num)
 
-        label = (primary or {}).get("label") or (f"B{button_num}" if primary is None else "")
-        if label:
-            color = theme["disabled"] if (primary or {}).get("type") == "nothing" or primary is None else theme["text"]
-            text = font_big.render(label, True, pygame.Color(color))
-            surface.blit(text, text.get_rect(center=(rect.centerx, rect.centery - 12)))
-
-        # Optional secondary-action hint.
         secondary = get_secondary_action(slot) if slot else None
+
+        # Content area: panel minus status bar, and minus the hint line when a
+        # secondary exists — images/labels must never spill over either.
+        content_bottom = rect.bottom - STATUS_BAR_HEIGHT - 16
+        if secondary:
+            content_bottom -= font_small.get_height() + 16
+        content_center = (rect.centerx, (rect.top + 8 + content_bottom) // 2)
+
+        # Image (if assigned and loadable) replaces the label on the display —
+        # purely visual, everything else still refers to the label. Falls back
+        # to the label if the asset is missing. Text auto-fits the panel.
+        image = self._panel_image(
+            (primary or {}).get("image_asset_id"),
+            (rect.width - 32, content_bottom - rect.top - 16),
+        )
+        if image is not None:
+            surface.blit(image, image.get_rect(center=content_center))
+        else:
+            label = (primary or {}).get("label") or (f"B{button_num}" if primary is None else "")
+            if label:
+                color = theme["disabled"] if (primary or {}).get("type") == "nothing" or primary is None else theme["text"]
+                text = self._fit_text(label, rect.width - 24, 72, color)
+                surface.blit(text, text.get_rect(center=content_center))
         if secondary:
             hint = font_small.render(f"Hold for {secondary.get('label', '')}", True,
                                      pygame.Color(theme["disabled"]))
@@ -219,6 +241,32 @@ class UiRenderer:
             if font.size(text)[0] <= max_width or size <= 16:
                 return font.render(text, True, color)
             size = max(16, int(size * 0.85))
+
+    def _panel_image(self, asset_id, max_size):
+        """Loaded + aspect-fit-scaled Surface for an asset id, or None. The
+        scaled result is cached per target size (panel sizes are stable
+        between frames)."""
+        if not asset_id:
+            return None
+        pygame = self._pygame
+        if asset_id not in self._image_cache:
+            try:
+                self._image_cache[asset_id] = pygame.image.load(
+                    str(image_path(asset_id))).convert_alpha()
+            except Exception as e:
+                log.warning("image %s failed to load: %s", asset_id, e)
+                self._image_cache[asset_id] = None
+        original = self._image_cache[asset_id]
+        if original is None:
+            return None
+        max_w, max_h = max(int(max_size[0]), 1), max(int(max_size[1]), 1)
+        key = (asset_id, max_w, max_h)
+        if key not in self._scaled_cache:
+            w, h = original.get_size()
+            scale = min(max_w / w, max_h / h)
+            self._scaled_cache[key] = pygame.transform.smoothscale(
+                original, (max(int(w * scale), 1), max(int(h * scale), 1)))
+        return self._scaled_cache[key]
 
     def _color(self, value):
         """pygame.Color for a stored color (resolves palette references)."""
@@ -277,8 +325,15 @@ class UiRenderer:
 
         label_text = action.get("label", "EXP") if action else "EXP"
         bar_color = action.get("on_color", "#3399FF") if action else theme["disabled"]
-        label = font_small.render(label_text, True, pygame.Color(theme["text"]))
-        surface.blit(label, label.get_rect(centerx=exp_rect.centerx, top=exp_rect.top + 16))
+        # Expression assignments can carry an image too (Milestone 13); it
+        # replaces the label at the top of the strip, fit to the strip width.
+        image = self._panel_image(
+            (action or {}).get("image_asset_id"), (exp_rect.width - 20, 80))
+        if image is not None:
+            surface.blit(image, image.get_rect(centerx=exp_rect.centerx, top=exp_rect.top + 12))
+        else:
+            label = self._fit_text(label_text, exp_rect.width - 16, 36)
+            surface.blit(label, label.get_rect(centerx=exp_rect.centerx, top=exp_rect.top + 16))
 
         bar = exp_rect.inflate(-exp_rect.width // 2, -120)
         bar.bottom = exp_rect.bottom - 16

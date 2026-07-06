@@ -36,6 +36,7 @@ from pathlib import Path
 
 from config import presets
 from config.loader import save_config
+from web import images
 from config.model import ACTION_TYPES, PALETTE_SIZE, get_menu
 from state.manager import StateManager
 
@@ -115,8 +116,8 @@ def validate_action(raw, allowed_types, secondary: bool, pc_base: int = 0) -> di
     if not secondary:
         action["off_color"] = _color(raw.get("off_color"), "off_color")
         image = raw.get("image_asset_id")
-        if image is not None and not isinstance(image, str):
-            raise ValueError("image_asset_id must be a string or null")
+        if image is not None:
+            image = images.validate_asset_id(image)
         action["image_asset_id"] = image
 
     if action_type in ("effect_cc", "action_cc"):
@@ -232,6 +233,15 @@ def _iter_all_actions(config: dict):
                 yield secondary["action"]
 
 
+def clear_image_references(config: dict, asset_id: str) -> int:
+    cleared = 0
+    for action in _iter_all_actions(config):
+        if action.get("image_asset_id") == asset_id:
+            action["image_asset_id"] = None
+            cleared += 1
+    return cleared
+
+
 def apply_settings(config: dict, payload: dict) -> dict:
     """Validate and apply the editable global settings; returns what changed."""
     updates = {}
@@ -325,6 +335,18 @@ class _Handler(BaseHTTPRequestHandler):
             )
             self.end_headers()
             self.wfile.write(body)
+        elif path == "/api/images":
+            self._json(200, {"images": images.list_images()})
+        elif path.startswith("/images/"):
+            try:
+                file = images.image_path(path[len("/images/"):].removesuffix(".png"))
+            except ValueError:
+                self._json(404, {"error": "not found"})
+                return
+            if not file.exists():
+                self._json(404, {"error": "not found"})
+                return
+            self._respond(200, file.read_bytes(), "image/png")
         elif path == "/api/status":
             state = self.app.state
             mode = state.expression_mode
@@ -351,6 +373,8 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/preset/delete": self.app.preset_delete,
             "/api/preset/new": self.app.preset_new,
             "/api/preset/import": self.app.preset_import,
+            "/api/image": self.app.image_upload,
+            "/api/image/delete": self.app.image_delete,
             "/api/undo": self.app.undo,
             "/api/redo": self.app.redo,
         }.get(self.path)
@@ -486,6 +510,24 @@ class WebServer:
             presets.delete_preset(name)
         log.info("preset deleted: %s", name)
         return {"presets": presets.list_presets()}
+
+    # --- images --------------------------------------------------------------
+
+    def image_upload(self, payload: dict) -> dict:
+        image = images.save_image(payload.get("name"), payload.get("data"))
+        log.info("image uploaded: %s", image["id"])
+        return {"image": image, "images": images.list_images()}
+
+    def image_delete(self, payload: dict) -> dict:
+        asset_id = images.validate_asset_id(payload.get("id"))
+        # Clear config references first (undoable), then remove the file
+        # (file deletion itself is not undoable).
+        cleared = self._mutate(
+            lambda: {"cleared": clear_image_references(self.state.config, asset_id)}
+        )
+        images.delete_image(asset_id)
+        log.info("image deleted: %s (%d references cleared)", asset_id, cleared["cleared"])
+        return {"images": images.list_images(), **cleared}
 
     def _install(self, new_config: dict) -> dict:
         install_config(self.state, new_config)

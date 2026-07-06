@@ -331,9 +331,37 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   over HTTP, bad preset name rejected, screenshot of B10 menu-name panel;
   all test edits reverted (user config preserved). 113 unit tests passing.
 
+### Milestone 13 — Image Upload (2026-07-06)
+- No Pillow / no server-side image lib (RAM stays flat on the Zero 2 W): the
+  BROWSER resizes/compresses (canvas, max 480x240, shrinks until <120 KB PNG)
+  and posts a data URL; `web/images.py` validates (PNG magic, base64, 128 KB
+  cap, id whitelist regex) and stores under
+  `/opt/midi-controller/assets/images/<slug>-<hexts>.png` (outside the deploy
+  path; `CONTROLLER_ASSETS_DIR` overrides for tests). Asset ids are
+  self-describing (slug+timestamp) so renderer caches never go stale.
+- API: `GET /api/images`, `GET /images/<id>.png`, `POST /api/image`
+  {name, data}, `POST /api/image/delete` {id} — delete clears all config
+  references first (undoable mutation), then removes the file.
+- Web: new Images tab — file upload, LIBRARY grid with thumbnails/delete,
+  and the IMAGE CREATOR (text + font/style/color/optional solid background
+  flattened on a 320x120 canvas, auto-fit font). Primary action cards gained
+  an image picker (dropdown from library + thumbnail); secondaries can't
+  have images per schema.
+- Renderer: `_panel_image()` two-level cache (asset -> Surface, plus
+  per-target-size smoothscale cache); image replaces the label inside the
+  panel content area (panel minus status bar minus hint line — measured so
+  nothing spills), aspect-fit + centered. Expression strip shows the active
+  assignment's image fit to strip width. Labels now auto-fit via `_fit_text`
+  everywhere (M13 "text must resize" requirement).
+- Verified on the Pi: uploaded a generated PNG over the API, byte-identical
+  round-trip via `/images/…`, assigned to Menu 1 B1 -> screenshot shows the
+  image scaled inside the panel (fixed an overlap with the "Hold for" hint
+  by shrinking the content box); delete cleared the reference and the user's
+  config was restored. 122 unit tests passing.
+
 ## Current Milestone
 
-Milestone 13 — Image Upload
+Milestone 13.5 — Hold UI
 
 ## Decisions Made
 
