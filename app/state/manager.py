@@ -39,6 +39,10 @@ class StateManager:
         # Bumped on every config mutation (web edits, preset loads) so the
         # renderer's dirty check notices without hashing the whole config.
         self.config_version = 0
+        # Boot screen: shown until main.py finishes startup (plus a minimum
+        # on-screen time in the renderer). Messages appear bottom-left.
+        self.booting = True
+        self.boot_messages: list[str] = []
         self.settings_open = False
         self.settings_index = 0
         # Settings menu content (Milestone 15), owned by SettingsLogic; the
@@ -47,6 +51,11 @@ class StateManager:
         self.settings_view = "main"
         self.settings_rows: list[tuple[str, str]] = []
         self.settings_presets: list[str] = []
+
+    def boot_log(self, message: str) -> None:
+        """Append a startup progress line for the boot screen."""
+        self.boot_messages = self.boot_messages + [message]  # atomic swap
+        log.info("boot: %s", message)
 
     def install_config(self, new_config: dict) -> None:
         """Swap a whole new config (preset load/new/import, undo/redo) into

@@ -561,6 +561,23 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
 - NOT deployed: the Pi was powered off when this landed. Deploy +
   browser click-through of the new Settings tab on next power-up.
 
+### Post-M16 — boot screen (2026-07-06)
+- `app/ui/assets/loading_screen.jpg` (user's 1920x480 artwork, moved from
+  the repo root; the 96 MB `loading_screen.psd` source stays in the root,
+  gitignored) drawn full-bleed while booting: last 4 startup messages
+  bottom-left (drop-shadowed), firmware version bottom-right.
+- `app/version.py FIRMWARE_VERSION` ("1.0.0") — bump per notable deploy;
+  logged at startup too.
+- `state.booting` + `state.boot_log()` (atomic list swap, render-thread
+  safe); main.py logs config/MIDI/web/inputs/ready steps. Because startup
+  finishes before the display even initializes, the renderer holds the
+  boot screen for BOOT_MIN_SECONDS (2.5 s) after display-up, then the
+  frame signature flips and the normal UI paints. Boot frames only repaint
+  when a message arrives.
+- Verified locally with a Mac scratch venv (pygame 2.6.1, SDL dummy):
+  rendered boot frame shows artwork + messages + v1.0.0. NOT yet seen on
+  the Pi (powered off) — verify on next power-up boot.
+
 ## Current Milestone
 
 All roadmap milestones through 16 complete. Next up: user hardware bring-up

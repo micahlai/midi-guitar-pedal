@@ -25,6 +25,7 @@ from logic.settings import SettingsLogic
 from midi.engine import MidiEngine
 from state.manager import StateManager
 from ui.renderer import UiRenderer
+from version import FIRMWARE_VERSION
 from web.server import WebServer
 
 HEARTBEAT_SECONDS = 30.0
@@ -42,7 +43,7 @@ def main() -> int:
         level=logging.INFO,
         format="%(name)s: %(message)s",
     )
-    log.info("hello controller")
+    log.info("hello controller, firmware v%s", FIRMWARE_VERSION)
     log.info(
         "buttons on GPIO %s, shift on GPIO %d",
         constants.GPIO_ASSIGNABLE_BUTTONS,
@@ -53,19 +54,25 @@ def main() -> int:
     log.info("config version %d loaded for %s", config["version"], config["device"]["name"])
 
     state = StateManager(config)
+    state.boot_log(f"config loaded — preset {config.get('preset_name') or '—'}")
     # The queue carries ("button", (num, kind, t)) and ("midi", message).
     events: queue.Queue = queue.Queue()
     midi = MidiEngine(state, config, on_message=lambda msg: events.put(("midi", msg)))
     ui = UiRenderer(state)
     web = WebServer(state)
 
-    for module in (midi, ui, web):
-        module.start()
+    ui.start()
+    midi.start()
+    state.boot_log("MIDI engine started")
+    web.start()
+    if web.port is not None:
+        state.boot_log(f"web editor on port {web.port}")
 
     buttons = ButtonReader(config, lambda ev: events.put(("button", ev)))
     buttons.start()
     expression_input = ExpressionInput(config, state)
     expression_input.start()
+    state.boot_log("buttons and expression input started")
 
     def shutdown_machine():
         # Safe power-off: systemd stops the service (SIGTERM -> clean module
@@ -92,6 +99,8 @@ def main() -> int:
     signal.signal(signal.SIGUSR1, lambda s, f: ui.request_screenshot())
 
     sdnotify.notify("READY=1")
+    state.boot_log("ready")
+    state.booting = False  # renderer holds the boot screen a moment longer
 
     next_heartbeat = 0.0
     next_watchdog = 0.0

@@ -13,6 +13,7 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 
 from config.model import get_primary, get_secondary_action, get_slot, resolve_color
 from web.images import image_path
@@ -20,6 +21,7 @@ from hardware import battery
 from hardware.constants import DISPLAY_HEIGHT, DISPLAY_WIDTH
 from state.manager import StateManager
 from ui.gles import CanvasPresenter
+from version import FIRMWARE_VERSION
 
 log = logging.getLogger("controller.ui")
 
@@ -33,6 +35,14 @@ HEADER_HEIGHT = 52  # top strip: current patch, tempo, power (Milestone 16)
 FLICKER_PERIOD_S = 2.0  # primary+secondary both active -> alternate on_colors
 TEMPO_STALE_SECONDS = 2.0  # blank the BPM readout when the clock stops
 SCREENSHOT_PATH = "/tmp/controller-frame.png"
+
+# Boot screen: artwork with startup messages bottom-left and the firmware
+# version bottom-right. Startup finishes before the display is even up, so
+# hold the screen a minimum time once visible.
+BOOT_IMAGE_PATH = Path(__file__).parent / "assets" / "loading_screen.jpg"
+BOOT_MIN_SECONDS = 2.5
+BOOT_MESSAGE_COUNT = 4  # most recent messages shown
+BOOT_MARGIN = 28
 
 # Hold progress bar (Milestone 13.5): starts growing this long after the
 # press and is rescaled so it still reaches the top exactly at the hold time.
@@ -63,6 +73,8 @@ class UiRenderer:
         self._image_cache: dict[str, object] = {}
         # (asset_id, w, h) -> scaled Surface for the last-used target size.
         self._scaled_cache: dict[tuple, object] = {}
+        self._display_up_at: float | None = None
+        self._boot_background_cache: tuple | None = None  # (size, Surface|None)
 
     @property
     def theme(self) -> dict:
@@ -125,6 +137,7 @@ class UiRenderer:
             "display up: mode %dx%d, driver %s, UI canvas %dx%d centered",
             w, h, pygame.display.get_driver(), DISPLAY_WIDTH, DISPLAY_HEIGHT,
         )
+        self._display_up_at = time.monotonic()
 
         font_big = pygame.font.Font(None, 72)
         font_small = pygame.font.Font(None, 36)
@@ -165,6 +178,9 @@ class UiRenderer:
         (flicker, tempo staleness) enter as coarse buckets so an idle screen
         redraws at most a couple of times per second."""
         state = self.state
+        if self._boot_active(now):
+            # Only new boot messages repaint; leaving boot changes the shape.
+            return ("boot", tuple(state.boot_messages))
         if state.hold_started:
             return None
         return (
@@ -186,7 +202,65 @@ class UiRenderer:
             int(now / (FLICKER_PERIOD_S / 2)),
         )
 
+    def _boot_active(self, now: float) -> bool:
+        """Boot screen stays up while main.py starts modules AND for a
+        minimum time after the display comes up (startup usually beats the
+        display init, which would flash the artwork for a frame or two)."""
+        if self.state.booting:
+            return True
+        return (self._display_up_at is not None
+                and now < self._display_up_at + BOOT_MIN_SECONDS)
+
+    def _boot_background(self, pygame, size):
+        """The boot artwork scaled to cover the canvas (cached), or None if
+        the file is missing/unreadable."""
+        if self._boot_background_cache and self._boot_background_cache[0] == size:
+            return self._boot_background_cache[1]
+        surface = None
+        try:
+            image = pygame.image.load(str(BOOT_IMAGE_PATH))
+            try:
+                image = image.convert()
+            except pygame.error:
+                pass  # headless harness: no display mode set
+            w, h = image.get_size()
+            scale = max(size[0] / w, size[1] / h)
+            surface = pygame.transform.smoothscale(
+                image, (max(int(w * scale), 1), max(int(h * scale), 1)))
+        except Exception as e:
+            log.warning("boot image %s failed to load: %s", BOOT_IMAGE_PATH, e)
+        self._boot_background_cache = (size, surface)
+        return surface
+
+    def _draw_boot(self, pygame, surface, font_small) -> None:
+        surface.fill(pygame.Color("#000000"))
+        image = self._boot_background(pygame, surface.get_size())
+        if image is not None:
+            surface.blit(image, image.get_rect(
+                center=(surface.get_width() // 2, surface.get_height() // 2)))
+
+        def blit_shadowed(text, x, y):
+            for offset, color in ((2, "#000000"), (0, "#FFFFFF")):
+                rendered = font_small.render(text, True, pygame.Color(color))
+                surface.blit(rendered, (x + offset, y + offset))
+            return rendered
+
+        # Startup messages bottom-left, newest at the bottom.
+        y = surface.get_height() - BOOT_MARGIN
+        for message in reversed(self.state.boot_messages[-BOOT_MESSAGE_COUNT:]):
+            y -= font_small.get_height() + 6
+            blit_shadowed(message, BOOT_MARGIN, y)
+
+        # Firmware version bottom-right.
+        version = f"v{FIRMWARE_VERSION}"
+        width = font_small.size(version)[0]
+        blit_shadowed(version, surface.get_width() - BOOT_MARGIN - width,
+                      surface.get_height() - BOOT_MARGIN - font_small.get_height())
+
     def _draw(self, pygame, surface, font_big, font_small) -> None:
+        if self._boot_active(time.monotonic()):
+            self._draw_boot(pygame, surface, font_small)
+            return
         theme = self.theme
         surface.fill(pygame.Color(theme["background"]))
         if self.state.settings_open:

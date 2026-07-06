@@ -47,6 +47,7 @@ class TempoTrackerTest(unittest.TestCase):
 class FrameSignatureTest(unittest.TestCase):
     def setUp(self):
         self.state = StateManager(default_config())
+        self.state.booting = False
         self.renderer = UiRenderer(self.state)
 
     def test_stable_when_idle(self):
@@ -73,6 +74,36 @@ class FrameSignatureTest(unittest.TestCase):
         fresh = self.renderer._frame_signature(1.0)
         stale = self.renderer._frame_signature(3.5)
         self.assertNotEqual(fresh, stale)
+
+
+class BootScreenTest(unittest.TestCase):
+    def setUp(self):
+        self.state = StateManager(default_config())
+        self.renderer = UiRenderer(self.state)
+
+    def test_boot_active_while_booting_and_min_time(self):
+        self.assertTrue(self.renderer._boot_active(0.0))  # state.booting
+        self.state.boot_log("ready")
+        self.state.booting = False
+        self.assertFalse(self.renderer._boot_active(100.0))  # display not up
+        self.renderer._display_up_at = 100.0
+        self.assertTrue(self.renderer._boot_active(101.0))  # min hold time
+        self.assertFalse(self.renderer._boot_active(103.0))
+
+    def test_boot_signature_tracks_messages_then_leaves(self):
+        first = self.renderer._frame_signature(0.0)
+        self.assertEqual(first, ("boot", ()))
+        self.state.boot_log("MIDI engine started")
+        self.assertNotEqual(first, self.renderer._frame_signature(0.0))
+        self.state.booting = False
+        # Out of boot: the signature switches to the normal frame tuple.
+        self.assertNotEqual(self.renderer._frame_signature(0.0)[0], "boot")
+
+    def test_boot_log_is_atomic_swap(self):
+        before = self.state.boot_messages
+        self.state.boot_log("one")
+        self.assertEqual(before, [])  # old list untouched (render thread safe)
+        self.assertEqual(self.state.boot_messages, ["one"])
 
 
 class HeaderTextTest(unittest.TestCase):
