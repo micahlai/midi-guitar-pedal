@@ -1,11 +1,14 @@
-"""MIDI engine: USB gadget send + receive (BLE lands in Milestone 14).
+"""MIDI engine: USB gadget + BLE MIDI send/receive (Milestones 7, 8, 14).
 
-The Pi runs as a USB MIDI gadget (f_midi via configfs, see
+USB: the Pi runs as a USB MIDI gadget (f_midi via configfs, see
 scripts/setup-usb-midi-gadget.sh); mido/python-rtmidi opens the gadget's ALSA
-port. Channels are 1-16 in config and converted to mido's 0-15 here.
+port. BLE: midi/ble.py advertises the MIDI-over-BLE GATT service. Transports
+are chosen with config midi.usb_enabled / midi.ble_enabled (both by default);
+outgoing messages go to every enabled transport, incoming messages from
+either arrive on the same on_message callback (delivered on that transport's
+own thread; main.py points it at the thread-safe event queue).
 
-Incoming messages are delivered on mido's callback thread to the on_message
-callable (main.py points it at the thread-safe event queue).
+Channels are 1-16 in config and converted to mido's 0-15 here.
 """
 
 import logging
@@ -23,17 +26,27 @@ class MidiEngine:
         self.on_message = on_message or (lambda msg: None)
         self._out = None
         self._in = None
+        self._ble = None
+        self._mido = None
         self._lock = threading.Lock()
 
     def start(self) -> None:
-        if not self.config["midi"]["usb_enabled"]:
-            log.info("USB MIDI disabled in config")
-            return
         try:
             import mido
         except ImportError as e:
             log.error("mido unavailable, MIDI disabled: %s", e)
             return
+        self._mido = mido
+        if self.config["midi"]["usb_enabled"]:
+            self._start_usb(mido)
+        else:
+            log.info("USB MIDI disabled in config")
+        if self.config["midi"]["ble_enabled"]:
+            self._start_ble()
+        else:
+            log.info("BLE MIDI disabled in config")
+
+    def _start_usb(self, mido) -> None:
         try:
             names = mido.get_output_names()
         except Exception as e:
@@ -56,6 +69,22 @@ class MidiEngine:
         except Exception as e:
             log.error("open MIDI input %r failed (send-only): %s", name, e)
 
+    def _start_ble(self) -> None:
+        from midi.ble import BleMidiServer
+        ble = BleMidiServer(self.config["device"]["name"], self._on_ble_packet)
+        if ble.start():
+            self._ble = ble
+
+    def _on_ble_packet(self, packet: bytes) -> None:
+        from midi.ble_codec import decode_packet
+        for midi_bytes in decode_packet(packet):
+            try:
+                msg = self._mido.Message.from_bytes(midi_bytes)
+            except ValueError as e:
+                log.warning("BLE MIDI: undecodable message %s: %s", midi_bytes, e)
+                continue
+            self._on_incoming(msg)
+
     def _on_incoming(self, msg) -> None:
         if msg.type in ("control_change", "program_change", "note_on", "note_off"):
             log.info("MIDI in: %s", msg)
@@ -69,11 +98,14 @@ class MidiEngine:
             if self._out:
                 self._out.close()
                 self._out = None
+            if self._ble:
+                self._ble.stop()
+                self._ble = None
         log.info("MIDI engine stopped")
 
     @property
     def connected(self) -> bool:
-        return self._out is not None
+        return self._out is not None or (self._ble is not None and self._ble.connected)
 
     def send_cc(self, channel: int, cc: int, value: int) -> None:
         self._send("control_change", channel, control=cc, value=max(0, min(127, value)))
@@ -86,15 +118,24 @@ class MidiEngine:
         self._send("program_change", channel, program=max(0, min(127, program)))
 
     def _send(self, kind: str, channel: int, **fields) -> None:
-        import mido
-        msg = mido.Message(kind, channel=channel - 1, **fields)
+        if self._mido is None:
+            return
+        msg = self._mido.Message(kind, channel=channel - 1, **fields)
+        sent = []
         with self._lock:
-            if self._out is None:
-                log.debug("MIDI not connected, dropping %s", msg)
-                return
-            try:
-                self._out.send(msg)
-            except Exception as e:
-                log.error("MIDI send failed: %s", e)
-                return
-        log.info("MIDI out: %s", msg)
+            # midi.usb_enabled/ble_enabled are read live so the web toggles
+            # mute a transport immediately (opening one needs a restart).
+            if self._out is not None and self.config["midi"]["usb_enabled"]:
+                try:
+                    self._out.send(msg)
+                    sent.append("usb")
+                except Exception as e:
+                    log.error("USB MIDI send failed: %s", e)
+            if (self._ble is not None and self._ble.connected
+                    and self.config["midi"]["ble_enabled"]):
+                self._ble.send_midi(msg.bytes())
+                sent.append("ble")
+        if sent:
+            log.info("MIDI out (%s): %s", "+".join(sent), msg)
+        else:
+            log.debug("MIDI not connected, dropping %s", msg)

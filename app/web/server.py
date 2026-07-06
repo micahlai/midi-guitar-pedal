@@ -268,6 +268,11 @@ def apply_settings(config: dict, payload: dict) -> dict:
         updates["expression_panel_width_ratio"] = (
             config["ui"], "expression_panel_width_ratio", round(float(value), 3),
         )
+    for transport in ("usb_enabled", "ble_enabled"):
+        if transport in payload:
+            updates[transport] = (
+                config["midi"], transport, _bool(payload[transport], transport),
+            )
     if "preset_name" in payload:
         updates["preset_name"] = (
             config, "preset_name", presets.validate_preset_name(payload["preset_name"]),

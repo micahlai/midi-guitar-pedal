@@ -376,9 +376,41 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   50% of 2.0 s — screenshot shows both bars at exactly half height behind
   the content. 132 unit tests passing.
 
+### Milestone 14 — BLE MIDI (2026-07-06)
+- `midi/ble_codec.py`: pure BLE-MIDI packet codec (13-bit timestamps,
+  running status incl. status-omitted and data-only forms, realtime bytes
+  pass through without touching running status, sysex dropped). Unit-tested.
+- `midi/ble.py BleMidiServer`: BLE MIDI peripheral over BlueZ D-Bus — GATT
+  app (MIDI service 03B80E5A…/char 7772E5DB…, read + write-without-response
+  + notify) + LE advertisement, GLib main loop in a daemon thread. Needs apt
+  `python3-dbus python3-gi` (installed on the Pi; venv is
+  --system-site-packages). Degrades to USB-only if dbus/adapter missing.
+  Sends notify per message via GLib.idle_add (thread-safe); incoming
+  WriteValue packets decode -> mido messages -> the same main event queue.
+- **Kernel/BlueZ gotcha**: bluetoothd 5.82 registers ads with the EXTENDED
+  advertising MGMT commands; kernel 6.18 returns Invalid Parameters for
+  them on the Zero 2 W's legacy-only radio (btmon: Add Extended Advertising
+  Data 0x0055 -> 0x0d). Fallback: `sudo -n btmgmt add-adv -c -g -u <MIDI
+  UUID> 1` (legacy path works). btmgmt never exits/prints when piped, so
+  it runs under `timeout 5` and success is confirmed via `bluetoothctl
+  show` ActiveInstances. GATT connections still land on the bluetoothd app.
+- Adapter prep on the Pi (persisted): `rfkill unblock bluetooth`, powered on
+  via D-Bus at server start each boot, Alias set to device.name.
+- MidiEngine reworked: USB and BLE transports side by side; outgoing goes to
+  every enabled+connected transport (`midi.usb_enabled`/`ble_enabled` read
+  LIVE at send time so the new Global Settings checkboxes mute immediately;
+  enabling a transport that was off at boot needs a restart). `MIDI out
+  (usb+ble): …` logging shows routing.
+- Verified on the Pi: journal shows GATT registered + "advertising via
+  btmgmt (legacy)", ActiveInstances 1, USB still open, settings toggles
+  round-trip. NOT yet verified: an actual MainStage BLE connection (needs
+  the user's Mac: Audio MIDI Setup -> Bluetooth -> connect "guitar-pedal"/
+  "Pi MIDI Foot Controller"; a CoreBluetooth scan from the CLI was blocked
+  by macOS Bluetooth TCC permissions). 142 unit tests passing.
+
 ## Current Milestone
 
-Milestone 14 — BLE MIDI
+Milestone 15 — Settings Menu (next up)
 
 ## Decisions Made
 
@@ -420,8 +452,11 @@ Milestone 14 — BLE MIDI
 
 ## Next Actions
 
-1. Milestone 13: image upload (resize/store server-side, render on button
-   panels, expression type image; stdlib-only resize may need Pillow — check
-   RAM footprint on the Zero 2 W).
-2. Still pending from earlier: physical button wiring (Milestone 3) and pot
-   hardware (Milestone 5) bench verification.
+1. Milestone 15: on-device settings menu (wireless status, pairing toggle,
+   IP/hostname, preset switching).
+2. User verification pending: connect MainStage over BLE (Audio MIDI Setup ->
+   Bluetooth) — advertising is live but an actual central connection hasn't
+   been exercised.
+3. Still pending from earlier: physical button wiring (Milestone 3) and pot
+   hardware (Milestone 5) bench verification; hold-bar UI (13.5) will get its
+   first real-button exercise then.

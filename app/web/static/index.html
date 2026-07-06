@@ -267,6 +267,10 @@
             <option value="1">1 (MainStage-style)</option>
           </select>
         </div>
+        <div class="check"><input type="checkbox" id="set-usb"><label for="set-usb">USB MIDI</label></div>
+        <div class="check"><input type="checkbox" id="set-ble"><label for="set-ble">Bluetooth (BLE) MIDI</label></div>
+        <div class="hint">Disabling mutes a connection immediately; enabling one
+          that was off at boot takes effect after a restart.</div>
         <h2 style="margin-top:24px">Expression Panel</h2>
         <div class="field">
           <label>Panel width: <span id="set-width-val"></span>% of screen</label>
@@ -1161,6 +1165,10 @@ function initSettings() {
   $("set-shift").value = config.buttons.shift_hold_seconds;
   $("set-hold").value = config.buttons.secondary_hold_default_seconds;
   $("set-pcbase").value = config.midi.program_display_base;
+  $("set-usb").checked = config.midi.usb_enabled;
+  $("set-ble").checked = config.midi.ble_enabled;
+  $("set-usb").onchange = () => saveSettings({ usb_enabled: $("set-usb").checked });
+  $("set-ble").onchange = () => saveSettings({ ble_enabled: $("set-ble").checked });
   const width = Math.round(config.ui.expression_panel_width_ratio * 100);
   $("set-width").value = width;
   $("set-width-val").textContent = width;
@@ -1190,7 +1198,8 @@ async function saveSettings(payload) {
     const data = await api("/api/settings", payload);
     for (const [key, value] of Object.entries(data.settings)) {
       if (key === "expression_panel_width_ratio") config.ui[key] = value;
-      else if (key === "program_display_base") config.midi[key] = value;
+      else if (["program_display_base", "usb_enabled", "ble_enabled"].includes(key))
+        config.midi[key] = value;
       else if (key === "preset_name") config.preset_name = value;
       else config.buttons[key] = value;
     }
