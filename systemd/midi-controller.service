@@ -1,0 +1,14 @@
+[Unit]
+Description=MIDI Foot Controller
+After=local-fs.target network.target
+
+[Service]
+Type=simple
+User=micah
+WorkingDirectory=/opt/midi-controller/app
+ExecStart=/opt/midi-controller/venv/bin/python /opt/midi-controller/app/main.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

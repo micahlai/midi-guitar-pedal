@@ -1,0 +1,22 @@
+"""State manager: the single source of truth for runtime state.
+
+Inputs (future): button events, incoming MIDI, web config changes, ADC
+values, expression detect changes, power button events.
+Outputs (future): outgoing MIDI, UI updates, web live updates, saved state.
+"""
+
+import logging
+
+log = logging.getLogger("controller.state")
+
+
+class StateManager:
+    def __init__(self, config: dict):
+        self.config = config
+        self.current_menu = 1
+        self.current_program: int | None = None
+        # effect_states[(channel, cc_number)] = bool, driven by MIDI feedback.
+        self.effect_states: dict[tuple[int, int], bool] = {}
+        self.expression_detected = False
+        self.expression_value = 0.0
+        self.shift_held = False

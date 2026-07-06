@@ -1,0 +1,4 @@
+# Milestone 1 has no third-party dependencies.
+# Later milestones will add (per docs/09_SOFTWARE_ARCHITECTURE.md):
+#   pygame (UI), fastapi + uvicorn (web), mido/python-rtmidi (MIDI),
+#   spidev (ADC), gpiozero/lgpio (buttons)
