@@ -8,14 +8,14 @@ Physical layout:
     BOTTOM ROW: B6  B7  B8  B9  B10 (Shift/Menu, not assignable)
 """
 
-GPIO_BUTTON_1 = 6
-GPIO_BUTTON_2 = 13
-GPIO_BUTTON_3 = 19
+GPIO_BUTTON_1 = 24
+GPIO_BUTTON_2 = 16
+GPIO_BUTTON_3 = 20
 GPIO_BUTTON_4 = 5
 GPIO_BUTTON_5 = 23
 GPIO_BUTTON_6 = 12
-GPIO_BUTTON_7 = 16
-GPIO_BUTTON_8 = 20
+GPIO_BUTTON_7 = 13
+GPIO_BUTTON_8 = 19
 GPIO_BUTTON_9 = 21
 GPIO_BUTTON_10_SHIFT = 26
 
@@ -46,7 +46,7 @@ GPIO_BY_BUTTON = {
     10: GPIO_BUTTON_10_SHIFT,
 }
 
-GPIO_POWER_BUTTON = 24
+GPIO_POWER_BUTTON = 6
 # Event-stream button number for the power button (footswitches are 1-10).
 BUTTON_NUM_POWER = 0
 

@@ -97,12 +97,16 @@
   }
   .btn.danger { color: var(--err); border-color: var(--err); }
 
-  /* ---- global settings tab ---- */
-  .global { display: grid; grid-template-columns: repeat(3, minmax(240px, 340px)); gap: 24px; }
+  /* ---- settings tab ---- */
+  .global { display: grid; grid-template-columns: repeat(4, minmax(220px, 300px)); gap: 24px; }
   .global h2 {
     font-size: 13px; margin: 0 0 12px; color: var(--dim);
     text-transform: uppercase; letter-spacing: .06em;
   }
+  .global h2 + .hint { margin-top: -8px; }
+  .global .col-preset h2 { color: var(--accent); }
+  .global .col-device h2 { color: #66aaff; }
+  .global h2:not(:first-child) { margin-top: 24px; }
   .global .field label { font-size: 12px; }
   .global .field input, .global .field select { font-size: 14px; padding: 7px 9px; }
   #statusbox { font-size: 13px; color: var(--dim); display: flex; flex-direction: column; gap: 6px; }
@@ -263,9 +267,17 @@
     <div class="img-lib" id="img-lib"></div>
   </div>
   <div id="view-global" hidden>
+    <div class="hint"><b style="color:var(--accent)">Preset settings</b> are saved
+      into presets and travel with export/import.
+      <b style="color:#66aaff">Device settings</b> belong to this pedal: loading or
+      importing a preset never changes them, and they are not written into preset files.</div>
     <div class="global">
-      <div>
-        <h2>Hold Settings</h2>
+      <div class="col-preset">
+        <h2>Preset — General</h2>
+        <div class="field">
+          <label>Preset name</label>
+          <input type="text" id="set-preset-name" maxlength="40">
+        </div>
         <div class="field">
           <label>Shift hold — Menu 4 (seconds)</label>
           <input type="number" id="set-shift" min="0.5" max="10" step="0.1">
@@ -274,9 +286,7 @@
           <label>Default secondary hold (seconds)</label>
           <input type="number" id="set-hold" min="0.2" max="10" step="0.1">
         </div>
-      </div>
-      <div>
-        <h2>MIDI</h2>
+        <h2>Preset — MIDI</h2>
         <div class="field">
           <label>Program numbers start at</label>
           <select id="set-pcbase">
@@ -284,24 +294,84 @@
             <option value="1">1 (MainStage-style)</option>
           </select>
         </div>
+        <div class="field">
+          <label>Default MIDI channel (new assignments)</label>
+          <input type="number" id="set-channel" min="1" max="16" step="1">
+        </div>
+      </div>
+      <div class="col-preset">
+        <h2>Preset — Display</h2>
+        <div class="field">
+          <label>Expression panel width: <span id="set-width-val"></span>% of screen</label>
+          <input type="range" id="set-width" min="5" max="30" step="1">
+        </div>
+        <div class="row2">
+          <div class="field"><label>Background</label><input type="color" id="set-th-bg"></div>
+          <div class="field"><label>Panel background</label><input type="color" id="set-th-panel"></div>
+          <div class="field"><label>Text</label><input type="color" id="set-th-text"></div>
+          <div class="field"><label>Dimmed text</label><input type="color" id="set-th-dim"></div>
+        </div>
+        <h2>Live Status</h2>
+        <div id="statusbox">connecting…</div>
+      </div>
+      <div class="col-device">
+        <h2>Device — Identity</h2>
+        <div class="field">
+          <label>Device name (USB / Bluetooth)</label>
+          <input type="text" id="set-devname" maxlength="32">
+        </div>
+        <div class="field">
+          <label>Web editor port</label>
+          <input type="number" id="set-webport" min="1024" max="65535" step="1">
+        </div>
+        <div class="hint">Name and port apply after a restart.</div>
+        <h2>Device — MIDI Transports</h2>
         <div class="check"><input type="checkbox" id="set-usb"><label for="set-usb">USB MIDI</label></div>
         <div class="check"><input type="checkbox" id="set-ble"><label for="set-ble">Bluetooth (BLE) MIDI</label></div>
         <div class="hint">Disabling mutes a connection immediately; enabling one
           that was off at boot takes effect after a restart.</div>
-        <h2 style="margin-top:24px">Expression Panel</h2>
-        <div class="field">
-          <label>Panel width: <span id="set-width-val"></span>% of screen</label>
-          <input type="range" id="set-width" min="5" max="30" step="1">
-        </div>
       </div>
-      <div>
-        <h2>Preset</h2>
+      <div class="col-device">
+        <h2>Device — Buttons</h2>
         <div class="field">
-          <label>Preset name</label>
-          <input type="text" id="set-preset-name" maxlength="40">
+          <label>Debounce (ms)</label>
+          <input type="number" id="set-debounce" min="5" max="200" step="1">
         </div>
-        <h2 style="margin-top:24px">Live Status</h2>
-        <div id="statusbox">connecting…</div>
+        <div class="row2">
+          <div class="field">
+            <label>Power double-press (ms)</label>
+            <input type="number" id="set-dpress" min="150" max="2000" step="10">
+          </div>
+          <div class="field">
+            <label>Power hold — off (s)</label>
+            <input type="number" id="set-phold" min="0.5" max="10" step="0.1">
+          </div>
+        </div>
+        <h2>Device — Expression Pedal</h2>
+        <div class="check"><input type="checkbox" id="set-detect"><label for="set-detect">Detect pin enabled</label></div>
+        <div class="row2">
+          <div class="field">
+            <label>Send deadband</label>
+            <input type="number" id="set-deadband" min="0" max="16" step="1">
+          </div>
+          <div class="field">
+            <label>Poll interval (ms)</label>
+            <input type="number" id="set-poll" min="5" max="100" step="1">
+          </div>
+          <div class="field">
+            <label>Home-return alpha</label>
+            <input type="number" id="set-ralpha" min="0.01" max="1" step="0.01">
+          </div>
+          <div class="field">
+            <label>Return interval (ms)</label>
+            <input type="number" id="set-rint" min="10" max="200" step="5">
+          </div>
+          <div class="field">
+            <label>Return stop threshold</label>
+            <input type="number" id="set-rstop" min="0" max="5" step="0.1">
+          </div>
+        </div>
+        <div class="hint">Button and expression hardware settings apply after a restart.</div>
       </div>
     </div>
   </div>
@@ -401,7 +471,7 @@ function actionMeta(a) {
 const TABS = [
   ["overview", "Overview"], [1, "Menu 1"], [2, "Menu 2"], [3, "Menu 3"], [4, "Menu 4"],
   ["palette", "Palette"], ["images", "Images"], ["presets", "Presets"],
-  ["global", "Global Settings"],
+  ["global", "Settings"],
 ];
 
 function renderTabs() {
@@ -1252,30 +1322,98 @@ document.addEventListener("keydown", e => {
   }
 });
 
-/* ---------- global settings tab ---------- */
+/* ---------- settings tab (preset-scoped + device-scoped) ---------- */
+
+// payload key -> config path. One element = section holding the same key;
+// several = the full path; empty = top-level key.
+const SETTING_PATHS = {
+  preset_name: [],
+  shift_hold_seconds: ["buttons"], secondary_hold_default_seconds: ["buttons"],
+  program_display_base: ["midi"], default_channel: ["midi"],
+  usb_enabled: ["midi"], ble_enabled: ["midi"],
+  expression_panel_width_ratio: ["ui"],
+  theme_background: ["ui", "theme", "background"],
+  theme_panel_background: ["ui", "theme", "panel_background"],
+  theme_text: ["ui", "theme", "text"],
+  theme_disabled: ["ui", "theme", "disabled"],
+  device_name: ["device", "name"],
+  web_port: ["web", "port"],
+  debounce_ms: ["buttons"], power_double_press_ms: ["buttons"], power_hold_seconds: ["buttons"],
+  detect_enabled: ["expression"], send_deadband: ["expression"], poll_interval_ms: ["expression"],
+  return_alpha: ["expression"], return_interval_ms: ["expression"],
+  return_stop_threshold: ["expression"],
+};
+
+function applySavedSetting(key, value) {
+  const path = SETTING_PATHS[key];
+  if (path === undefined) return;
+  const keys = path.length === 0 ? [key] : path.length === 1 ? [...path, key] : path;
+  let obj = config;
+  for (const k of keys.slice(0, -1)) obj = obj[k];
+  obj[keys[keys.length - 1]] = value;
+}
+
+function bindNumber(id, key, parse) {
+  const el = $(id);
+  el.onchange = () => {
+    const v = parse(el.value);
+    if (!isNaN(v)) saveSettings({ [key]: v });
+  };
+}
+
+function bindCheck(id, key) {
+  const el = $(id);
+  el.onchange = () => saveSettings({ [key]: el.checked });
+}
+
+function bindColor(id, key) {
+  const el = $(id);
+  el.onchange = () => saveSettings({ [key]: el.value.toUpperCase() });
+}
 
 function initSettings() {
+  // Preset-scoped.
+  $("set-preset-name").value = config.preset_name || "";
   $("set-shift").value = config.buttons.shift_hold_seconds;
   $("set-hold").value = config.buttons.secondary_hold_default_seconds;
   $("set-pcbase").value = config.midi.program_display_base;
-  $("set-usb").checked = config.midi.usb_enabled;
-  $("set-ble").checked = config.midi.ble_enabled;
-  $("set-usb").onchange = () => saveSettings({ usb_enabled: $("set-usb").checked });
-  $("set-ble").onchange = () => saveSettings({ ble_enabled: $("set-ble").checked });
+  $("set-channel").value = config.midi.default_channel;
   const width = Math.round(config.ui.expression_panel_width_ratio * 100);
   $("set-width").value = width;
   $("set-width-val").textContent = width;
+  $("set-th-bg").value = config.ui.theme.background;
+  $("set-th-panel").value = config.ui.theme.panel_background;
+  $("set-th-text").value = config.ui.theme.text;
+  $("set-th-dim").value = config.ui.theme.disabled;
+  // Device-scoped.
+  $("set-devname").value = config.device.name;
+  $("set-webport").value = config.web.port;
+  $("set-usb").checked = config.midi.usb_enabled;
+  $("set-ble").checked = config.midi.ble_enabled;
+  $("set-debounce").value = config.buttons.debounce_ms;
+  $("set-dpress").value = config.buttons.power_double_press_ms;
+  $("set-phold").value = config.buttons.power_hold_seconds;
+  $("set-detect").checked = config.expression.detect_enabled;
+  $("set-deadband").value = config.expression.send_deadband;
+  $("set-poll").value = config.expression.poll_interval_ms;
+  $("set-ralpha").value = config.expression.return_alpha;
+  $("set-rint").value = config.expression.return_interval_ms;
+  $("set-rstop").value = config.expression.return_stop_threshold;
 
-  $("set-preset-name").value = config.preset_name || "";
   $("set-preset-name").onchange = async () => {
     await saveSettings({ preset_name: $("set-preset-name").value.trim() });
     presetHeader();
   };
-  $("set-shift").onchange = () => saveSettings({ shift_hold_seconds: parseFloat($("set-shift").value) });
-  $("set-hold").onchange = () => saveSettings({ secondary_hold_default_seconds: parseFloat($("set-hold").value) });
+  bindNumber("set-shift", "shift_hold_seconds", parseFloat);
+  bindNumber("set-hold", "secondary_hold_default_seconds", parseFloat);
+  bindNumber("set-channel", "default_channel", v => parseInt(v, 10));
   $("set-width").oninput = () => { $("set-width-val").textContent = $("set-width").value; };
   $("set-width").onchange = () =>
     saveSettings({ expression_panel_width_ratio: parseInt($("set-width").value, 10) / 100 });
+  bindColor("set-th-bg", "theme_background");
+  bindColor("set-th-panel", "theme_panel_background");
+  bindColor("set-th-text", "theme_text");
+  bindColor("set-th-dim", "theme_disabled");
   // Changing the base re-numbers every stored program server-side, so pull
   // the whole config back down and re-render.
   $("set-pcbase").onchange = async () => {
@@ -1283,19 +1421,31 @@ function initSettings() {
     config = await api("/api/config");
     switchTab(currentTab, true);
   };
+
+  $("set-devname").onchange = () => {
+    const v = $("set-devname").value.trim();
+    if (v) saveSettings({ device_name: v });
+  };
+  bindNumber("set-webport", "web_port", v => parseInt(v, 10));
+  bindCheck("set-usb", "usb_enabled");
+  bindCheck("set-ble", "ble_enabled");
+  bindNumber("set-debounce", "debounce_ms", v => parseInt(v, 10));
+  bindNumber("set-dpress", "power_double_press_ms", v => parseInt(v, 10));
+  bindNumber("set-phold", "power_hold_seconds", parseFloat);
+  bindCheck("set-detect", "detect_enabled");
+  bindNumber("set-deadband", "send_deadband", v => parseInt(v, 10));
+  bindNumber("set-poll", "poll_interval_ms", v => parseInt(v, 10));
+  bindNumber("set-ralpha", "return_alpha", parseFloat);
+  bindNumber("set-rint", "return_interval_ms", v => parseInt(v, 10));
+  bindNumber("set-rstop", "return_stop_threshold", parseFloat);
 }
 
 async function saveSettings(payload) {
   setStatus("saving…");
   try {
     const data = await api("/api/settings", payload);
-    for (const [key, value] of Object.entries(data.settings)) {
-      if (key === "expression_panel_width_ratio") config.ui[key] = value;
-      else if (["program_display_base", "usb_enabled", "ble_enabled"].includes(key))
-        config.midi[key] = value;
-      else if (key === "preset_name") config.preset_name = value;
-      else config.buttons[key] = value;
-    }
+    for (const [key, value] of Object.entries(data.settings))
+      applySavedSetting(key, value);
     setStatus("saved", "ok");
   } catch (err) {
     setStatus("save failed: " + err.message, "err");

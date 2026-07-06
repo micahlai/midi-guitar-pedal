@@ -138,3 +138,45 @@ DEFAULT_CONFIG = {
 
 def default_config() -> dict:
     return copy.deepcopy(DEFAULT_CONFIG)
+
+
+# (section, key) config paths that belong to THIS DEVICE, not to a preset:
+# hardware identity, transports, wiring/timing calibration. Preset files are
+# saved without them and loading/importing a preset never changes them —
+# everything else in the config travels with the preset.
+DEVICE_SETTING_PATHS = (
+    ("device", "name"),
+    ("device", "hostname"),
+    ("web", "enabled"),
+    ("web", "port"),
+    ("midi", "usb_enabled"),
+    ("midi", "ble_enabled"),
+    ("buttons", "debounce_ms"),
+    ("buttons", "power_double_press_ms"),
+    ("buttons", "power_hold_seconds"),
+    ("expression", "detect_enabled"),
+    ("expression", "send_deadband"),
+    ("expression", "poll_interval_ms"),
+    ("expression", "return_alpha"),
+    ("expression", "return_interval_ms"),
+    ("expression", "return_stop_threshold"),
+    ("ui", "screen_width"),
+    ("ui", "screen_height"),
+)
+
+
+def strip_device_settings(config: dict) -> None:
+    """Remove the device-scoped keys in place (preset save/export)."""
+    for section, key in DEVICE_SETTING_PATHS:
+        section_dict = config.get(section)
+        if isinstance(section_dict, dict):
+            section_dict.pop(key, None)
+
+
+def copy_device_settings(source: dict, target: dict) -> None:
+    """Overlay source's device-scoped settings onto target — applied to a
+    freshly loaded/imported preset so it can't change device configuration."""
+    for section, key in DEVICE_SETTING_PATHS:
+        section_dict = source.get(section)
+        if isinstance(section_dict, dict) and key in section_dict:
+            target.setdefault(section, {})[key] = copy.deepcopy(section_dict[key])

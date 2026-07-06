@@ -528,6 +528,39 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   re-advertise after a central disconnect (no central has connected yet),
   UI error screen (unit-level only).
 
+### Post-M16 — full Settings tab with preset/device scopes (2026-07-06)
+- Web "Global Settings" tab became "Settings" and now exposes EVERY editable
+  setting, split into two visually distinct groups:
+  - **Preset settings** (saved into presets, travel with export/import):
+    preset name, shift hold, default secondary hold, program display base,
+    default MIDI channel (new), expression panel width, the four theme
+    colors (new).
+  - **Device settings** (this pedal only): device name (new), web port
+    (new), USB/BLE transport toggles, button debounce / power double-press /
+    power hold (new), expression hardware (detect pin, deadband, poll
+    interval, home-return alpha/interval/stop threshold — all new).
+    Hints mark which need a restart (most are cached at module init).
+- Scope semantics enforced server-side via
+  `config/defaults.py DEVICE_SETTING_PATHS` + strip/copy helpers:
+  - preset save/export strips device keys from the file;
+  - preset load/new/import overlays the live device settings onto the
+    incoming config (web `_install` AND the on-device settings menu), so a
+    preset — including one from another pedal — can never change device
+    configuration. Undo/redo still snapshots the full config, so device
+    edits remain undoable.
+  - Legacy preset files that still contain device keys are neutralized by
+    the same overlay on load.
+- `/api/settings` validates the whole surface (table of new validators:
+  _int/_string; theme colors are literal #RRGGBB only, no palette refs);
+  client applies responses through a SETTING_PATHS map instead of ad-hoc
+  key routing.
+- Verified locally (Mac, temp CONFIG_DIR, real HTTP server): mixed
+  preset+device settings post, 400 on bad web_port, export without device
+  keys, load reverting preset values while keeping device values, page
+  serving both groups. 173 unit tests passing.
+- NOT deployed: the Pi was powered off when this landed. Deploy +
+  browser click-through of the new Settings tab on next power-up.
+
 ## Current Milestone
 
 All roadmap milestones through 16 complete. Next up: user hardware bring-up
@@ -582,6 +615,7 @@ battery/BMS milestone.
    hardware (Milestone 5) bench verification; hold-bar UI (13.5), settings
    menu navigation (15) and power-hold shutdown (16) get their first real
    exercise then.
-3. Post-M14 web editor tweaks (palette labels/popover) still need a browser
-   click-through — deployed but unverified in a real browser.
+3. Deploy pending (Pi was off): post-M16 Settings tab (preset/device scopes).
+   Also still unverified in a real browser: post-M14 palette labels/popover
+   and the new Settings tab click-through.
 4. Future milestone: battery/BMS (hardware/battery.py read() is the hook).

@@ -190,6 +190,18 @@ class SettingsLogicTest(unittest.TestCase):
         self.assertEqual(self.state.settings_view, "main")
         self.assertTrue(self.state.settings_open)
 
+    def test_preset_load_keeps_device_settings(self):
+        self.state.config["device"]["name"] = "This Pedal"
+        self.state.config["midi"]["ble_enabled"] = False
+        # The preset file claims different device settings; they must lose.
+        self.presets.configs["Rock"]["device"]["name"] = "Other Pedal"
+        self._open_presets()
+        self.press(7)
+        self.press(9)
+        self.assertEqual(self.state.config["preset_name"], "Rock")
+        self.assertEqual(self.state.config["device"]["name"], "This Pedal")
+        self.assertFalse(self.state.config["midi"]["ble_enabled"])
+
     def test_preset_current_marker_and_initial_selection(self):
         self.state.config["preset_name"] = "Rock"
         self._open_presets()

@@ -6,12 +6,13 @@ one validates/migrates it with the same code path as the live config
 (Milestone 12.5).
 """
 
+import copy
 import json
 import logging
 import re
 
 from config import loader
-from config.defaults import default_config
+from config.defaults import default_config, strip_device_settings
 from config.loader import prepare_config
 
 log = logging.getLogger("controller.presets")
@@ -53,7 +54,11 @@ def save_preset(name: str, config: dict) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     path = preset_path(name)
     tmp = path.with_suffix(".json.tmp")
-    snapshot = dict(config, preset_name=validate_preset_name(name))
+    # Device-scoped settings stay out of preset files: loading them back (or
+    # on another pedal) must not change device configuration.
+    snapshot = copy.deepcopy(config)
+    strip_device_settings(snapshot)
+    snapshot["preset_name"] = validate_preset_name(name)
     with tmp.open("w") as f:
         json.dump(snapshot, f, indent=2)
         f.write("\n")

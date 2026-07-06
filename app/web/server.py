@@ -35,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from config import presets
+from config.defaults import copy_device_settings, strip_device_settings
 from config.loader import save_config
 from web import images
 from config.model import ACTION_TYPES, PALETTE_SIZE, get_menu
@@ -85,6 +86,18 @@ def _seconds(value, name, lo, hi):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not lo <= value <= hi:
         raise ValueError(f"{name} must be a number between {lo} and {hi}")
     return round(float(value), 2)
+
+
+def _int(value, name, lo, hi):
+    if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+        raise ValueError(f"{name} must be an integer {lo}-{hi}")
+    return value
+
+
+def _string(value, name, max_len):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value.strip()[:max_len]
 
 
 def validate_action(raw, allowed_types, secondary: bool, pc_base: int = 0) -> dict:
@@ -249,13 +262,24 @@ def clear_image_references(config: dict, asset_id: str) -> int:
 
 
 def apply_settings(config: dict, payload: dict) -> dict:
-    """Validate and apply the editable global settings; returns what changed."""
+    """Validate and apply the editable global settings; returns what changed.
+
+    Covers both scopes shown on the web Settings tab: preset-scoped values
+    (saved into presets) and device-scoped values (see
+    config.defaults.DEVICE_SETTING_PATHS — presets never touch them).
+    """
     updates = {}
+
+    # --- preset-scoped ------------------------------------------------------
     if "program_display_base" in payload:
         base = payload["program_display_base"]
         if base not in (0, 1):
             raise ValueError("program_display_base must be 0 or 1")
         updates["program_display_base"] = (config["midi"], "program_display_base", base)
+    if "default_channel" in payload:
+        updates["default_channel"] = (
+            config["midi"], "default_channel", _channel(payload["default_channel"]),
+        )
     if "shift_hold_seconds" in payload:
         updates["shift_hold_seconds"] = (
             config["buttons"], "shift_hold_seconds",
@@ -274,15 +298,62 @@ def apply_settings(config: dict, payload: dict) -> dict:
         updates["expression_panel_width_ratio"] = (
             config["ui"], "expression_panel_width_ratio", round(float(value), 3),
         )
-    for transport in ("usb_enabled", "ble_enabled"):
-        if transport in payload:
-            updates[transport] = (
-                config["midi"], transport, _bool(payload[transport], transport),
+    for theme_key in ("background", "panel_background", "text", "disabled"):
+        name = f"theme_{theme_key}"
+        if name in payload:
+            updates[name] = (
+                config["ui"]["theme"], theme_key,
+                _color(payload[name], name, allow_palette=False),
             )
     if "preset_name" in payload:
         updates["preset_name"] = (
             config, "preset_name", presets.validate_preset_name(payload["preset_name"]),
         )
+
+    # --- device-scoped ------------------------------------------------------
+    if "device_name" in payload:
+        updates["device_name"] = (
+            config["device"], "name", _string(payload["device_name"], "device_name", 32),
+        )
+    if "web_port" in payload:
+        updates["web_port"] = (
+            config["web"], "port", _int(payload["web_port"], "web_port", 1024, 65535),
+        )
+    for transport in ("usb_enabled", "ble_enabled"):
+        if transport in payload:
+            updates[transport] = (
+                config["midi"], transport, _bool(payload[transport], transport),
+            )
+    for name, key, lo, hi in (
+        ("debounce_ms", "debounce_ms", 5, 200),
+        ("power_double_press_ms", "power_double_press_ms", 150, 2000),
+    ):
+        if name in payload:
+            updates[name] = (config["buttons"], key, _int(payload[name], name, lo, hi))
+    if "power_hold_seconds" in payload:
+        updates["power_hold_seconds"] = (
+            config["buttons"], "power_hold_seconds",
+            _seconds(payload["power_hold_seconds"], "power_hold_seconds", 0.5, 10.0),
+        )
+    if "detect_enabled" in payload:
+        updates["detect_enabled"] = (
+            config["expression"], "detect_enabled",
+            _bool(payload["detect_enabled"], "detect_enabled"),
+        )
+    for name, lo, hi in (
+        ("send_deadband", 0, 16),
+        ("poll_interval_ms", 5, 100),
+        ("return_interval_ms", 10, 200),
+    ):
+        if name in payload:
+            updates[name] = (config["expression"], name, _int(payload[name], name, lo, hi))
+    for name, lo, hi in (
+        ("return_alpha", 0.01, 1.0),
+        ("return_stop_threshold", 0.0, 5.0),
+    ):
+        if name in payload:
+            updates[name] = (config["expression"], name, _seconds(payload[name], name, lo, hi))
+
     if not updates:
         raise ValueError("no editable settings in request")
     old_base = config["midi"]["program_display_base"]
@@ -336,6 +407,9 @@ class _Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._json(400, {"error": str(exc)})
                 return
+            # Exports are preset files: no device-scoped settings.
+            config = copy.deepcopy(config)
+            strip_device_settings(config)
             body = json.dumps(config, indent=2).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -541,6 +615,8 @@ class WebServer:
         return {"images": images.list_images(), **cleared}
 
     def _install(self, new_config: dict) -> dict:
+        # Presets never carry device-scoped settings; keep this device's.
+        copy_device_settings(self.state.config, new_config)
         install_config(self.state, new_config)
         return {"config": self.state.config}
 

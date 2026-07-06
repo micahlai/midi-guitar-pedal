@@ -13,6 +13,7 @@ import logging
 import threading
 
 from config import presets
+from config.defaults import copy_device_settings
 from config.loader import save_config
 from hardware import sysinfo
 
@@ -129,6 +130,8 @@ class SettingsLogic:
         except (ValueError, OSError) as e:
             log.error("preset load failed: %s", e)
             return
+        # Presets never carry device-scoped settings; keep this device's.
+        copy_device_settings(self.state.config, config)
         self.state.install_config(config)
         self.save(self.state.config)
         log.info("preset loaded from settings menu: %s", name)
