@@ -67,7 +67,7 @@ def main() -> int:
     action_logic = ActionLogic(config, state, midi, expression_logic)
     menu_logic = MenuLogic(config, state, on_action_event=action_logic.on_button_event)
     power_logic = PowerLogic(config, state)
-    settings_logic = SettingsLogic(state)
+    settings_logic = SettingsLogic(state, midi=midi)
     midi_in_logic = MidiInLogic(config, state)
 
     running = True
@@ -101,6 +101,7 @@ def main() -> int:
         now = time.monotonic()
         menu_logic.tick(now)
         power_logic.tick(now)
+        settings_logic.tick(now)
         action_logic.tick(now)
         expression_logic.tick(now)
         if now >= next_heartbeat:

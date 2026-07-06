@@ -224,20 +224,9 @@ def set_palette(config: dict, colors=None, labels=None) -> dict:
 
 
 def install_config(state: StateManager, new_config: dict) -> None:
-    """Swap a whole new config (preset load/new/import, undo/redo) into the
-    shared dict IN PLACE — the logic/render modules hold references to the
-    config object itself, so it must never be replaced wholesale."""
-    config = state.config
-    for key in [k for k in config if k not in new_config]:
-        del config[key]
-    for key, value in new_config.items():
-        config[key] = value
-    # The active pot mode may now point at a slot that is no longer an
-    # expression assignment; drop it rather than let ExpressionLogic read
-    # expression fields off a foreign type.
-    action = state.get_expression_action()
-    if action is None or action.get("type") != "expression_pedal":
-        state.expression_mode = None
+    """Kept as the web module's seam; the real logic lives on StateManager
+    so the on-device settings menu can swap presets too."""
+    state.install_config(new_config)
 
 
 def _iter_all_actions(config: dict):

@@ -107,6 +107,17 @@ class MidiEngine:
     def connected(self) -> bool:
         return self._out is not None or (self._ble is not None and self._ble.connected)
 
+    @property
+    def usb_open(self) -> bool:
+        return self._out is not None
+
+    @property
+    def ble_state(self) -> str:
+        """off | advertising | connected — shown in the settings menu."""
+        if self._ble is None:
+            return "off"
+        return "connected" if self._ble.connected else "advertising"
+
     def send_cc(self, channel: int, cc: int, value: int) -> None:
         self._send("control_change", channel, control=cc, value=max(0, min(127, value)))
 

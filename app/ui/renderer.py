@@ -17,7 +17,6 @@ import time
 from config.model import get_primary, get_secondary_action, get_slot, resolve_color
 from web.images import image_path
 from hardware.constants import DISPLAY_HEIGHT, DISPLAY_WIDTH
-from logic.settings import SETTINGS_ITEMS
 from state.manager import StateManager
 from ui.gles import CanvasPresenter
 
@@ -395,22 +394,35 @@ class UiRenderer:
 
     def _draw_settings(self, pygame, surface, font_big, font_small) -> None:
         theme = self.theme
-        title = font_big.render("SETTINGS", True, pygame.Color(theme["text"]))
+        in_presets = self.state.settings_view == "presets"
+        title = font_big.render("PRESETS" if in_presets else "SETTINGS",
+                                True, pygame.Color(theme["text"]))
         surface.blit(title, (40, 24))
 
-        # Item list with highlight on the selected row.
-        item_top, item_h = 110, 52
-        for i, item in enumerate(SETTINGS_ITEMS):
-            selected = i == self.state.settings_index
+        # (label, value) rows from SettingsLogic, label left / value right,
+        # scrolled so the selected row stays visible (preset lists can be
+        # longer than the screen).
+        rows = self.state.settings_rows or [("…", "")]
+        index = min(self.state.settings_index, len(rows) - 1)
+        item_top, item_h, list_width = 100, 46, 1300
+        max_visible = max((surface.get_height() - item_top - 10) // item_h, 1)
+        first = max(0, index - max_visible + 1)
+        for i, (label, value) in enumerate(rows[first:first + max_visible]):
+            selected = first + i == index
+            y = item_top + i * item_h
             if selected:
-                row = pygame.Rect(32, item_top + i * item_h - 6, 700, item_h)
+                row = pygame.Rect(32, y - 6, list_width, item_h)
                 pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), row, border_radius=8)
-            color = theme["text"] if selected else theme["disabled"]
-            text = font_small.render(("> " if selected else "  ") + item, True, pygame.Color(color))
-            surface.blit(text, (48, item_top + i * item_h))
+            color = pygame.Color(theme["text"] if selected else theme["disabled"])
+            text = font_small.render(("> " if selected else "  ") + label, True, color)
+            surface.blit(text, (48, y))
+            if value:
+                val = font_small.render(str(value), True, color)
+                surface.blit(val, val.get_rect(right=32 + list_width - 24, top=y))
 
         # Footswitch legend, right side (B6/B7/B9/B10 per logic/settings.py).
-        legend = ["B6  up", "B7  down", "B9  select", "B10 exit"]
+        legend = ["B6  up", "B7  down", "B9  select",
+                  "B10 back" if in_presets else "B10 exit"]
         for i, line in enumerate(legend):
             text = font_small.render(line, True, pygame.Color(theme["text"]))
             surface.blit(text, (surface.get_width() - 360, 110 + i * 52))

@@ -34,6 +34,27 @@ class StateManager:
         self.hold_started: dict[int, tuple[float, float]] = {}
         self.settings_open = False
         self.settings_index = 0
+        # Settings menu content (Milestone 15), owned by SettingsLogic; the
+        # renderer only reads. View is "main" or "presets"; rows are the
+        # (label, value) lines currently on screen.
+        self.settings_view = "main"
+        self.settings_rows: list[tuple[str, str]] = []
+        self.settings_presets: list[str] = []
+
+    def install_config(self, new_config: dict) -> None:
+        """Swap a whole new config (preset load/new/import, undo/redo) into
+        the shared dict IN PLACE — modules hold references to the config
+        object itself, so it must never be replaced wholesale."""
+        for key in [k for k in self.config if k not in new_config]:
+            del self.config[key]
+        for key, value in new_config.items():
+            self.config[key] = value
+        # The active pot mode may now point at a slot that is no longer an
+        # expression assignment; drop it rather than let ExpressionLogic read
+        # expression fields off a foreign type.
+        action = self.get_expression_action()
+        if action is None or action.get("type") != "expression_pedal":
+            self.expression_mode = None
 
     def get_expression_action(self) -> dict | None:
         from config.model import get_secondary_action, get_slot

@@ -448,9 +448,42 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   System Settings -> Bluetooth. Use Audio MIDI Setup -> Window -> Show MIDI
   Studio -> Bluetooth button -> Connect.
 
+### Milestone 15 — Settings Menu (2026-07-06)
+- `hardware/sysinfo.py`: system status shell-outs with hard timeouts, all
+  degrading to unknown values (Wi-Fi SSID via `iw dev wlan0 link`, IP via
+  `hostname -I`, hostname, `bluetoothctl show` powered/discoverable, USB
+  gadget UDC state from `/sys/class/udc/*/state`, pairing toggle =
+  `bluetoothctl discoverable/pairable on|off`). `_run()` falls back to
+  /usr/sbin and /usr/bin prefixes — `iw` is NOT on PATH over plain ssh.
+- `logic/settings.py` rewritten: main view rows Wi-Fi / Bluetooth MIDI /
+  USB MIDI / IP+hostname / Pairing mode (toggle) / Preset (opens preset
+  view) / Exit. Status gathered on a worker thread every 2 s while open
+  (never blocks the 10 ms loop); rows composed into `state.settings_rows`
+  as (label, value) pairs so the renderer stays dumb. Selecting an info row
+  forces an immediate refresh. Providers/presets/save are constructor-
+  injectable; tests run the workers inline via `_spawn` override.
+- Preset view: lists saved presets ("current" marker, selection starts on
+  the active one), select = load (install_config + save_config, same swap
+  semantics as the web path), Back row / B10 return to the main view
+  (B10 only exits from the main view). Reopening always resets to main.
+- `install_config` moved to `StateManager.install_config()` (web/server.py
+  keeps a thin delegate) so on-device preset switching doesn't import web.
+- MidiEngine gained `usb_open` and `ble_state` (off/advertising/connected)
+  for the status rows; USB row combines UDC state ("host connected"/"no
+  host") with whether the ALSA port is open.
+- Renderer settings screen: title SETTINGS/PRESETS, label left + live value
+  right per row, scroll window keeps the selection visible for long preset
+  lists, 46 px rows so all 7 main rows fit 480 px, legend shows B10
+  exit/back per view.
+- Verified on the Pi: sysinfo live values (SSID "Hogwarts", IP, bluetooth
+  flags, UDC "not attached"), pairing toggle round-trip
+  (discoverable no->yes->no), headless screenshots of both views with real
+  system data. Physical navigation still awaits wired buttons (Milestone 3).
+- 151 unit tests passing.
+
 ## Current Milestone
 
-Milestone 15 — Settings Menu (next up)
+Milestone 16 — Polish and Reliability (next up)
 
 ## Decisions Made
 
@@ -492,8 +525,8 @@ Milestone 15 — Settings Menu (next up)
 
 ## Next Actions
 
-1. Milestone 15: on-device settings menu (wireless status, pairing toggle,
-   IP/hostname, preset switching).
+1. Milestone 16: polish and reliability (top status header with patch/tempo/
+   battery, render throttling, reconnects, error screens, systemd hardening).
 2. User verification pending: connect MainStage over BLE (Audio MIDI Setup ->
    Bluetooth) — advertising is live but an actual central connection hasn't
    been exercised.
