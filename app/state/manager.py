@@ -32,6 +32,13 @@ class StateManager:
         # hold progress bar (Milestone 13.5); cleared when the hold fires or
         # the button is released.
         self.hold_started: dict[int, tuple[float, float]] = {}
+        # Tempo from incoming MIDI clock (Milestone 16 header); updated_at
+        # lets the UI blank a stale readout when the clock stops.
+        self.tempo_bpm: float | None = None
+        self.tempo_updated_at = 0.0
+        # Bumped on every config mutation (web edits, preset loads) so the
+        # renderer's dirty check notices without hashing the whole config.
+        self.config_version = 0
         self.settings_open = False
         self.settings_index = 0
         # Settings menu content (Milestone 15), owned by SettingsLogic; the
@@ -55,6 +62,7 @@ class StateManager:
         action = self.get_expression_action()
         if action is None or action.get("type") != "expression_pedal":
             self.expression_mode = None
+        self.config_version += 1
 
     def get_expression_action(self) -> dict | None:
         from config.model import get_secondary_action, get_slot

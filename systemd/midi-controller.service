@@ -1,14 +1,22 @@
 [Unit]
 Description=MIDI Foot Controller
-After=local-fs.target network.target
+After=local-fs.target network.target bluetooth.service
+# Never stop retrying: on a gig there is nobody to run systemctl.
+StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 User=micah
 WorkingDirectory=/opt/midi-controller/app
 ExecStart=/opt/midi-controller/venv/bin/python /opt/midi-controller/app/main.py
-Restart=on-failure
+Restart=always
 RestartSec=2
+# main.py pings WATCHDOG=1 every 10 s; a hung main loop restarts the service.
+WatchdogSec=30
+# The journal is on SD card; cap runaway logging damage.
+LogRateLimitIntervalSec=30
+LogRateLimitBurst=500
 
 [Install]
 WantedBy=multi-user.target

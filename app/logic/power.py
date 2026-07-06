@@ -2,8 +2,9 @@
 
 - Double press (two presses within power_double_press_ms): toggle the
   on-device settings menu.
-- Hold for power_hold_seconds: safe shutdown — stubbed to a log line until
-  power hardware exists (Milestone 16 / battery milestone).
+- Hold for power_hold_seconds: safe shutdown via the injected on_shutdown
+  callback (main.py points it at `systemctl poweroff`; tests leave it None
+  so nothing real happens).
 - Single short press: nothing (hold is power on/off at the hardware level).
 """
 
@@ -13,8 +14,9 @@ log = logging.getLogger("controller.logic.power")
 
 
 class PowerLogic:
-    def __init__(self, config: dict, state):
+    def __init__(self, config: dict, state, on_shutdown=None):
         self.state = state
+        self.on_shutdown = on_shutdown
         self.double_press_s = config["buttons"]["power_double_press_ms"] / 1000.0
         self.hold_seconds = config["buttons"]["power_hold_seconds"]
         self._last_press_at: float | None = None
@@ -47,5 +49,9 @@ class PowerLogic:
             and t - self._down_at >= self.hold_seconds
         ):
             self._hold_fired = True
-            log.info("power hold %.1fs: shutdown requested (stub, no action)",
-                     self.hold_seconds)
+            if self.on_shutdown is None:
+                log.info("power hold %.1fs: shutdown requested (no handler wired)",
+                         self.hold_seconds)
+            else:
+                log.info("power hold %.1fs: shutting down", self.hold_seconds)
+                self.on_shutdown()

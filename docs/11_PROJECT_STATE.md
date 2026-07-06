@@ -481,9 +481,58 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   system data. Physical navigation still awaits wired buttons (Milestone 3).
 - 151 unit tests passing.
 
+### Milestone 16 — Polish and Reliability (2026-07-06)
+- **Top header bar** (52 px, grid/expression strip moved below it): current
+  patch on the left ("PATCH n · LABEL", label found from any program_change
+  assignment matching the current program, base-aware), tempo + power status
+  top right. Verified by live screenshot with the user's config.
+- **Tempo**: `midi/tempo.py TempoTracker` (pure, unit-tested) computes BPM
+  from incoming MIDI clock (24 ppqn, 2-beat window, >1 s gap resets).
+  Handled on the MIDI input thread in the engine (48 pulses/s never touch
+  the main queue); header shows "--- BPM" when the clock stops for 2 s.
+  mido's rtmidi backend does deliver clock (ignore_types timing=False).
+- **Battery**: `hardware/battery.py` stub returns None until the BMS
+  milestone; header shows "AC" (renders "n% CHG" once read() returns data).
+- **Render throttling**: the render thread computes a frame signature
+  (state fields + config_version counter + coarse time buckets for
+  flicker/tempo staleness) and skips draw + GL upload + flip when
+  unchanged — the last flipped frame stays on scanout. Idle CPU dropped
+  ~90% of a core -> ~9% total. Animations force redraws (signature None
+  while hold bars run); hold frames tick at 60 fps target for a smoother
+  bar. `state.config_version` is bumped by web mutations and
+  install_config so config edits repaint immediately.
+- **Reconnects**: MidiEngine.tick() reopens the USB gadget port every 5 s
+  when closed (boot race or send failure — sends now close the port and
+  let tick reopen; repeat failures log at DEBUG after the first). BLE:
+  StopNotify re-arms the btmgmt legacy advertising instance (a legacy-path
+  connection consumes it and bluetoothd only re-arms its own D-Bus ads) so
+  the pedal reappears in scans after a central disconnects.
+- **Error handling**: a _draw exception logs the traceback and shows a red
+  "UI ERROR" screen instead of killing the render thread; the main loop
+  wraps event dispatch + ticks so one bad event can't take the controller
+  down mid-set.
+- **Logging**: per-message MIDI in/out demoted to DEBUG (busy DAW sessions
+  made the journal chatty); unit adds journal rate limiting.
+- **systemd hardening**: Type=notify with `hardware/sdnotify.py` (READY=1,
+  STOPPING=1, WATCHDOG=1 every 10 s from the main loop), WatchdogSec=30,
+  Restart=always, StartLimitIntervalSec=0, After=bluetooth.service.
+  Verified live: service active under Type=notify, NRestarts=0.
+- **Power hold = real shutdown**: PowerLogic fires an injected on_shutdown
+  (main.py -> `sudo -n systemctl poweroff`; None in tests so nothing real
+  runs). systemd stops the service cleanly on the way down.
+- State persistence assessment: config/preset writes were already atomic
+  (tmp + rename); runtime state (menu, effect states) is intentionally
+  ephemeral — it must resync from MIDI feedback after boot.
+- 163 unit tests passing.
+- NOT yet exercised live: tempo readout with a real MIDI clock source, BLE
+  re-advertise after a central disconnect (no central has connected yet),
+  UI error screen (unit-level only).
+
 ## Current Milestone
 
-Milestone 16 — Polish and Reliability (next up)
+All roadmap milestones through 16 complete. Next up: user hardware bring-up
+(button wiring, pot, BLE connection from MainStage) and the future
+battery/BMS milestone.
 
 ## Decisions Made
 
@@ -525,11 +574,14 @@ Milestone 16 — Polish and Reliability (next up)
 
 ## Next Actions
 
-1. Milestone 16: polish and reliability (top status header with patch/tempo/
-   battery, render throttling, reconnects, error screens, systemd hardening).
-2. User verification pending: connect MainStage over BLE (Audio MIDI Setup ->
+1. User verification pending: connect MainStage over BLE (Audio MIDI Setup ->
    Bluetooth) — advertising is live but an actual central connection hasn't
-   been exercised.
-3. Still pending from earlier: physical button wiring (Milestone 3) and pot
-   hardware (Milestone 5) bench verification; hold-bar UI (13.5) will get its
-   first real-button exercise then.
+   been exercised. That will also exercise the M16 BLE re-advertise path and
+   the tempo header (MainStage sends MIDI clock).
+2. Still pending from earlier: physical button wiring (Milestone 3) and pot
+   hardware (Milestone 5) bench verification; hold-bar UI (13.5), settings
+   menu navigation (15) and power-hold shutdown (16) get their first real
+   exercise then.
+3. Post-M14 web editor tweaks (palette labels/popover) still need a browser
+   click-through — deployed but unverified in a real browser.
+4. Future milestone: battery/BMS (hardware/battery.py read() is the hook).

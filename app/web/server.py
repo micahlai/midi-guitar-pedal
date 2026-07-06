@@ -438,6 +438,7 @@ class WebServer:
             self._undo.append(before)
             del self._undo[:-UNDO_LIMIT]
             self._redo.clear()
+            self.state.config_version += 1
             self.save(self.state.config)
         return result
 

@@ -13,10 +13,15 @@ Channels are 1-16 in config and converted to mido's 0-15 here.
 
 import logging
 import threading
+import time
+
+from midi.tempo import TempoTracker
 
 log = logging.getLogger("controller.midi")
 
 PORT_NAME_HINT = "f_midi"
+USB_RETRY_SECONDS = 5.0  # reconnect poll while the gadget port is closed
+TEMPO_STALE_SECONDS = 2.0
 
 
 class MidiEngine:
@@ -29,6 +34,9 @@ class MidiEngine:
         self._ble = None
         self._mido = None
         self._lock = threading.Lock()
+        self._tempo = TempoTracker()
+        self._usb_retry_at = 0.0
+        self._usb_error_logged = False
 
     def start(self) -> None:
         try:
@@ -47,27 +55,60 @@ class MidiEngine:
             log.info("BLE MIDI disabled in config")
 
     def _start_usb(self, mido) -> None:
+        # Failures log at ERROR once, then at DEBUG — tick() retries every
+        # few seconds and must not flood the journal while unplugged.
+        fail = log.debug if self._usb_error_logged else log.error
         try:
             names = mido.get_output_names()
         except Exception as e:
-            log.error("MIDI backend unavailable: %s", e)
+            fail("MIDI backend unavailable: %s", e)
+            self._usb_error_logged = True
             return
         name = next((n for n in names if PORT_NAME_HINT in n), None)
         if name is None:
-            log.error("USB MIDI gadget port not found (ports: %s) — "
-                      "is usb-midi-gadget.service installed and dwc2 enabled?", names)
+            fail("USB MIDI gadget port not found (ports: %s) — "
+                 "is usb-midi-gadget.service installed and dwc2 enabled?", names)
+            self._usb_error_logged = True
             return
         try:
             self._out = mido.open_output(name)
         except Exception as e:
-            log.error("open MIDI output %r failed: %s", name, e)
+            fail("open MIDI output %r failed: %s", name, e)
+            self._usb_error_logged = True
             return
+        self._usb_error_logged = False
         log.info("MIDI output open: %s", name)
         try:
             self._in = mido.open_input(name, callback=self._on_incoming)
             log.info("MIDI input open: %s", name)
         except Exception as e:
             log.error("open MIDI input %r failed (send-only): %s", name, e)
+
+    def tick(self, now: float) -> None:
+        """Periodic maintenance from the main loop: reopen the USB gadget
+        port when it is closed (boot race with usb-midi-gadget.service, or a
+        send failure closed it)."""
+        if (self._mido is None or self._out is not None
+                or not self.config["midi"]["usb_enabled"]):
+            return
+        if now < self._usb_retry_at:
+            return
+        self._usb_retry_at = now + USB_RETRY_SECONDS
+        with self._lock:
+            if self._out is None:
+                self._start_usb(self._mido)
+
+    def _close_usb_after_error(self) -> None:
+        """Called under self._lock when a send fails: drop the ports so
+        tick() reopens them cleanly."""
+        for port in (self._in, self._out):
+            try:
+                if port:
+                    port.close()
+            except Exception:
+                pass
+        self._in = None
+        self._out = None
 
     def _start_ble(self) -> None:
         from midi.ble import BleMidiServer
@@ -86,8 +127,16 @@ class MidiEngine:
             self._on_incoming(msg)
 
     def _on_incoming(self, msg) -> None:
+        if msg.type == "clock":
+            # Tempo is computed here on the input thread — ~48 pulses/s must
+            # not churn the main event queue.
+            bpm = self._tempo.clock(time.monotonic())
+            if bpm is not None:
+                self.state.tempo_bpm = round(bpm, 1)
+                self.state.tempo_updated_at = time.monotonic()
+            return
         if msg.type in ("control_change", "program_change", "note_on", "note_off"):
-            log.info("MIDI in: %s", msg)
+            log.debug("MIDI in: %s", msg)
             self.on_message(msg)
 
     def stop(self) -> None:
@@ -141,12 +190,13 @@ class MidiEngine:
                     self._out.send(msg)
                     sent.append("usb")
                 except Exception as e:
-                    log.error("USB MIDI send failed: %s", e)
+                    log.error("USB MIDI send failed, reopening port: %s", e)
+                    self._close_usb_after_error()
             if (self._ble is not None and self._ble.connected
                     and self.config["midi"]["ble_enabled"]):
                 self._ble.send_midi(msg.bytes())
                 sent.append("ble")
         if sent:
-            log.info("MIDI out (%s): %s", "+".join(sent), msg)
+            log.debug("MIDI out (%s): %s", "+".join(sent), msg)
         else:
             log.debug("MIDI not connected, dropping %s", msg)

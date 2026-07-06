@@ -74,6 +74,7 @@ def _build_classes(dbus, dbus_service):
             self.path = service.path + "/char0"
             self.service_path = service.path
             self.on_bytes = on_bytes
+            self.on_disconnect = lambda: None  # set by BleMidiServer
             self.notifying = False
             super().__init__(bus, self.path)
 
@@ -103,6 +104,7 @@ def _build_classes(dbus, dbus_service):
         def StopNotify(self):
             self.notifying = False
             log.info("BLE MIDI central unsubscribed")
+            self.on_disconnect()
 
         def send(self, packet: bytes):
             if not self.notifying:
@@ -177,6 +179,7 @@ class BleMidiServer:
             App, Service, Char, Ad = _build_classes(dbus, dbus.service)
             service = Service(bus)
             self._char = Char(bus, service, self._on_write)
+            self._char.on_disconnect = self._on_central_disconnect
             service.characteristic = self._char
             app = App(bus, service)
             ad = Ad(bus, self.device_name)
@@ -211,6 +214,17 @@ class BleMidiServer:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
+
+    def _on_central_disconnect(self) -> None:
+        """A connection on the btmgmt (legacy) path consumes the advertising
+        instance — bluetoothd re-arms only its own D-Bus ads. Re-add the
+        instance after the central goes away so the pedal reappears in scans
+        (Milestone 16 reconnect handling)."""
+        if self._legacy_instance is None:
+            return
+        log.info("BLE central disconnected; re-arming legacy advertising")
+        threading.Thread(target=self._legacy_advertise, name="ble-readv",
+                         daemon=True).start()
 
     def _advertising_failed(self, error) -> None:
         """bluetoothd 5.82 registers ads with the kernel's EXTENDED

@@ -16,6 +16,7 @@ import time
 
 from config.model import get_primary, get_secondary_action, get_slot, resolve_color
 from web.images import image_path
+from hardware import battery
 from hardware.constants import DISPLAY_HEIGHT, DISPLAY_WIDTH
 from state.manager import StateManager
 from ui.gles import CanvasPresenter
@@ -23,11 +24,14 @@ from ui.gles import CanvasPresenter
 log = logging.getLogger("controller.ui")
 
 FPS = 30
+HOLD_FPS = 60  # target while a hold bar animates, for a smoother fill
 GRID_COLS = 5
 GRID_ROWS = 2
 PANEL_MARGIN = 8
 STATUS_BAR_HEIGHT = 22
+HEADER_HEIGHT = 52  # top strip: current patch, tempo, power (Milestone 16)
 FLICKER_PERIOD_S = 2.0  # primary+secondary both active -> alternate on_colors
+TEMPO_STALE_SECONDS = 2.0  # blank the BPM readout when the clock stops
 SCREENSHOT_PATH = "/tmp/controller-frame.png"
 
 # Hold progress bar (Milestone 13.5): starts growing this long after the
@@ -128,18 +132,59 @@ class UiRenderer:
         self._pygame = pygame
         clock = pygame.time.Clock()
 
+        # Milestone 16: skip the draw + GL upload when nothing on screen can
+        # have changed (signature compare) — the last flipped frame stays on
+        # scanout. This takes the render thread from ~90% of a core to near
+        # idle between interactions. A draw failure shows an error screen
+        # instead of killing the UI thread.
+        last_signature = object()
         while self._running:
             pygame.event.pump()
-            self._draw(pygame, canvas, font_big, font_small)
-            presenter.present(pygame.image.tobytes(canvas, "RGBA"))
-            pygame.display.flip()
-            if self.screenshot_requested:
-                self.screenshot_requested = False
-                pygame.image.save(canvas, SCREENSHOT_PATH)
-                log.info("frame saved to %s", SCREENSHOT_PATH)
-            clock.tick(FPS)
+            signature = self._frame_signature(time.monotonic())
+            if (signature is None or signature != last_signature
+                    or self.screenshot_requested):
+                last_signature = signature
+                try:
+                    self._draw(pygame, canvas, font_big, font_small)
+                except Exception:
+                    log.exception("draw failed")
+                    self._draw_error_screen(pygame, canvas, font_big, font_small)
+                presenter.present(pygame.image.tobytes(canvas, "RGBA"))
+                pygame.display.flip()
+                if self.screenshot_requested:
+                    self.screenshot_requested = False
+                    pygame.image.save(canvas, SCREENSHOT_PATH)
+                    log.info("frame saved to %s", SCREENSHOT_PATH)
+            clock.tick(HOLD_FPS if self.state.hold_started else FPS)
 
         pygame.quit()
+
+    def _frame_signature(self, now: float):
+        """Everything the frame depends on, cheap to compute; None while an
+        animation (hold bar) needs a redraw every frame. Time-driven visuals
+        (flicker, tempo staleness) enter as coarse buckets so an idle screen
+        redraws at most a couple of times per second."""
+        state = self.state
+        if state.hold_started:
+            return None
+        return (
+            state.config_version,
+            state.current_menu,
+            state.current_program,
+            tuple(sorted(state.effect_states.items())),
+            state.expression_detected,
+            round(state.expression_value, 3),
+            state.expression_mode,
+            state.shift_held,
+            tuple(sorted(state.pressed_buttons)),
+            tuple(sorted(state.secondary_pressed)),
+            state.settings_open,
+            state.settings_view,
+            state.settings_index,
+            tuple(state.settings_rows),
+            self._tempo_text(now),
+            int(now / (FLICKER_PERIOD_S / 2)),
+        )
 
     def _draw(self, pygame, surface, font_big, font_small) -> None:
         theme = self.theme
@@ -147,6 +192,8 @@ class UiRenderer:
         if self.state.settings_open:
             self._draw_settings(pygame, surface, font_big, font_small)
             return
+
+        self._draw_header(pygame, surface, font_small)
 
         # Expression strip: only when the pedal/pot is detected; the grid
         # takes the full width otherwise (docs/08_EXPRESSION_PEDAL_SPEC.md).
@@ -157,15 +204,16 @@ class UiRenderer:
         if show_exp:
             self._draw_expression(pygame, surface, font_small, grid_width, exp_width)
 
-        # 5x2 button panel grid. Physical numbering: top row B1-B5, bottom B6-B10.
+        # 5x2 button panel grid below the header. Physical numbering: top row
+        # B1-B5, bottom B6-B10.
         cell_w = grid_width // GRID_COLS
-        cell_h = surface.get_height() // GRID_ROWS
+        cell_h = (surface.get_height() - HEADER_HEIGHT) // GRID_ROWS
         for i in range(GRID_COLS * GRID_ROWS):
             col, row = i % GRID_COLS, i // GRID_COLS
             button_num = i + 1
             rect = pygame.Rect(
                 col * cell_w + PANEL_MARGIN,
-                row * cell_h + PANEL_MARGIN,
+                HEADER_HEIGHT + row * cell_h + PANEL_MARGIN,
                 cell_w - 2 * PANEL_MARGIN,
                 cell_h - 2 * PANEL_MARGIN,
             )
@@ -196,6 +244,75 @@ class UiRenderer:
                     pygame.draw.rect(surface, pygame.Color(theme["text"]), rect, width=4, border_radius=12)
             else:
                 self._draw_assignable_panel(pygame, surface, font_big, font_small, rect, button_num)
+
+    def _tempo_text(self, now: float) -> str:
+        bpm = self.state.tempo_bpm
+        if bpm is None or now - self.state.tempo_updated_at > TEMPO_STALE_SECONDS:
+            return "--- BPM"
+        return f"{bpm:.0f} BPM"
+
+    def _program_label(self, wire_program: int) -> str | None:
+        """Label of the first program_change assignment (any menu, primary or
+        secondary) targeting the current program — names the patch in the
+        header."""
+        base = self.state.config["midi"]["program_display_base"]
+        for menu in self.state.config["menus"]:
+            for slot in menu.get("slots", {}).values():
+                actions = [slot.get("primary"),
+                           (slot.get("secondary") or {}).get("action")]
+                for action in actions:
+                    if (action and action.get("type") == "program_change"
+                            and action["program_number"] - base == wire_program):
+                        return action.get("label") or None
+        return None
+
+    def _draw_header(self, pygame, surface, font_small) -> None:
+        """Top strip (Milestone 16): current patch on the left, tempo and
+        battery/charging status in the top right."""
+        theme = self.theme
+        pygame.draw.line(surface, pygame.Color(theme["panel_background"]),
+                         (0, HEADER_HEIGHT - 1),
+                         (surface.get_width(), HEADER_HEIGHT - 1), width=2)
+
+        program = self.state.current_program
+        if program is None:
+            patch = "PATCH —"
+        else:
+            display = program + self.state.config["midi"]["program_display_base"]
+            label = self._program_label(program)
+            patch = f"PATCH {display}" + (f"  ·  {label}" if label else "")
+        text = font_small.render(patch, True, pygame.Color(theme["text"]))
+        surface.blit(text, text.get_rect(left=16, centery=HEADER_HEIGHT // 2))
+
+        # Right side: power/battery status rightmost, tempo to its left.
+        info = battery.read()
+        if info is None:
+            power = "AC"  # no battery hardware yet (BMS milestone)
+        else:
+            power = f"{info['percent']}%" + (" CHG" if info["charging"] else "")
+        right = surface.get_width() - 16
+        text = font_small.render(power, True, pygame.Color(theme["text"]))
+        surface.blit(text, text.get_rect(right=right, centery=HEADER_HEIGHT // 2))
+        right -= text.get_width() + 48
+        tempo = self._tempo_text(time.monotonic())
+        color = theme["disabled"] if tempo.startswith("---") else theme["text"]
+        text = font_small.render(tempo, True, pygame.Color(color))
+        surface.blit(text, text.get_rect(right=right, centery=HEADER_HEIGHT // 2))
+
+    def _draw_error_screen(self, pygame, surface, font_big, font_small) -> None:
+        """Shown instead of a dead UI thread when _draw raises: the app keeps
+        running (MIDI/web unaffected) and the journal has the traceback."""
+        surface.fill(pygame.Color("#200000"))
+        title = font_big.render("UI ERROR", True, pygame.Color("#FF5555"))
+        surface.blit(title, (40, 24))
+        lines = [
+            "The display renderer hit an error; see the journal:",
+            "    journalctl -u midi-controller",
+            "MIDI and the web editor are still running.",
+        ]
+        for i, line in enumerate(lines):
+            text = font_small.render(line, True, pygame.Color("#FFFFFF"))
+            surface.blit(text, (44, 130 + i * 48))
 
     def _draw_assignable_panel(self, pygame, surface, font_big, font_small, rect, button_num) -> None:
         theme = self.theme
@@ -350,9 +467,9 @@ class UiRenderer:
         action = self.state.get_expression_action()
         exp_rect = pygame.Rect(
             grid_width + PANEL_MARGIN,
-            PANEL_MARGIN,
+            HEADER_HEIGHT + PANEL_MARGIN,
             exp_width - 2 * PANEL_MARGIN,
-            surface.get_height() - 2 * PANEL_MARGIN,
+            surface.get_height() - HEADER_HEIGHT - 2 * PANEL_MARGIN,
         )
         pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), exp_rect, border_radius=12)
 
