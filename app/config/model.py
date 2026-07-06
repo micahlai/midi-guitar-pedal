@@ -10,6 +10,19 @@ program_change, expression_pedal, nothing.
 
 ACTION_TYPES = ("effect_cc", "action_cc", "program_change", "expression_pedal", "nothing")
 
+PALETTE_SIZE = 10
+
+
+def resolve_color(config: dict, value, fallback: str = "#303030") -> str:
+    """Resolve a stored color to a #RRGGBB hex. Colors are either literal hex
+    or "palette:N" references into ui.color_palette (Milestone 12.5)."""
+    if isinstance(value, str) and value.startswith("palette:"):
+        try:
+            return config["ui"]["color_palette"][int(value.split(":", 1)[1])]
+        except (ValueError, IndexError, KeyError):
+            return fallback
+    return value or fallback
+
 
 def get_menu(config: dict, menu_id: int) -> dict | None:
     for menu in config["menus"]:

@@ -14,7 +14,7 @@ import os
 import threading
 import time
 
-from config.model import get_primary, get_secondary_action, get_slot
+from config.model import get_primary, get_secondary_action, get_slot, resolve_color
 from hardware.constants import DISPLAY_HEIGHT, DISPLAY_WIDTH
 from logic.settings import SETTINGS_ITEMS
 from state.manager import StateManager
@@ -34,10 +34,16 @@ SCREENSHOT_PATH = "/tmp/controller-frame.png"
 class UiRenderer:
     def __init__(self, state: StateManager):
         self.state = state
-        self.theme = state.config["ui"]["theme"]
         self._thread: threading.Thread | None = None
         self._running = False
         self.screenshot_requested = False
+        self._pygame = None  # set once the render thread imports pygame
+        self._font_cache: dict[int, object] = {}
+
+    @property
+    def theme(self) -> dict:
+        # Read live: a preset load swaps config["ui"] for a new dict.
+        return self.state.config["ui"]["theme"]
 
     def start(self) -> None:
         self._running = True
@@ -98,6 +104,8 @@ class UiRenderer:
 
         font_big = pygame.font.Font(None, 72)
         font_small = pygame.font.Font(None, 36)
+        self._font_cache = {72: font_big, 36: font_small}
+        self._pygame = pygame
         clock = pygame.time.Clock()
 
         while self._running:
@@ -144,9 +152,15 @@ class UiRenderer:
             pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), rect, border_radius=12)
 
             if button_num == 10:
-                # Shift/Menu panel: shows menu state, never a user assignment.
-                text = font_big.render(f"MENU {self.state.current_menu}", True, pygame.Color(theme["text"]))
-                surface.blit(text, text.get_rect(centerx=rect.centerx, centery=rect.centery - 24))
+                # Shift/Menu panel: menu name with "MENU n" beneath it in the
+                # small ("hold for") font, never a user assignment.
+                menu_id = self.state.current_menu
+                menu = next((m for m in self.state.config["menus"] if m["id"] == menu_id), {})
+                name = (menu.get("name") or f"Menu {menu_id}").upper()
+                text = self._fit_text(name, rect.width - 32, 72)
+                surface.blit(text, text.get_rect(centerx=rect.centerx, centery=rect.centery - 36))
+                sub = font_small.render(f"MENU {menu_id}", True, pygame.Color(theme["disabled"]))
+                surface.blit(sub, sub.get_rect(centerx=rect.centerx, centery=rect.centery + 14))
                 # Current program as received via MIDI, shown in the rig's
                 # numbering (wire value + program_display_base).
                 program = self.state.current_program
@@ -156,7 +170,7 @@ class UiRenderer:
                     f"PGM {'—' if program is None else program}", True,
                     pygame.Color(theme["disabled"]),
                 )
-                surface.blit(pgm, pgm.get_rect(centerx=rect.centerx, centery=rect.centery + 36))
+                surface.blit(pgm, pgm.get_rect(centerx=rect.centerx, centery=rect.centery + 54))
                 if self.state.shift_held:
                     pygame.draw.rect(surface, pygame.Color(theme["text"]), rect, width=4, border_radius=12)
             else:
@@ -188,9 +202,27 @@ class UiRenderer:
             STATUS_BAR_HEIGHT,
         )
         pygame.draw.rect(
-            surface, pygame.Color(self._slot_status_color(slot, button_num)),
+            surface, self._color(self._slot_status_color(slot, button_num)),
             status, border_radius=6,
         )
+
+    def _fit_text(self, text, max_width, start_size, color=None):
+        """Render text at the largest cached font size that fits max_width
+        (shared by the menu panel and, later, label auto-fit)."""
+        pygame = self._pygame
+        color = pygame.Color(color or self.theme["text"])
+        size = start_size
+        while True:
+            font = self._font_cache.get(size)
+            if font is None:
+                font = self._font_cache[size] = pygame.font.Font(None, size)
+            if font.size(text)[0] <= max_width or size <= 16:
+                return font.render(text, True, color)
+            size = max(16, int(size * 0.85))
+
+    def _color(self, value):
+        """pygame.Color for a stored color (resolves palette references)."""
+        return self._pygame.Color(resolve_color(self.state.config, value))
 
     def _slot_status_color(self, slot: dict | None, button_num: int) -> str:
         """Status bar color for the whole slot (docs/03_UI_SPEC.md).
@@ -260,7 +292,7 @@ class UiRenderer:
                 fill = pygame.Rect(bar.left, bar.top, bar.width, fill_h)
             else:
                 fill = pygame.Rect(bar.left, bar.bottom - fill_h, bar.width, fill_h)
-            pygame.draw.rect(surface, pygame.Color(bar_color), fill, border_radius=8)
+            pygame.draw.rect(surface, self._color(bar_color), fill, border_radius=8)
 
         # Home value marker line (docs/08: value rendered as distance from home).
         if action and action.get("has_home"):

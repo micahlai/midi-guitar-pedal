@@ -9,21 +9,34 @@ API:
 - GET  /                        editor page
 - GET  /api/config              full config JSON
 - GET  /api/status              live runtime state for the sidebar preview
+- GET  /api/presets             saved preset names
+- GET  /api/preset/export?name= preset file download (no name: live config)
 - POST /api/slot/primary        {menu_id, button_num, action}
 - POST /api/slot/secondary      {menu_id, button_num, hold_seconds, action}
 - POST /api/slot/secondary/remove  {menu_id, button_num}
 - POST /api/settings            subset of the editable global settings
+- POST /api/menu                {menu_id, name}
+- POST /api/palette             {colors: [10 x #RRGGBB]}
+- POST /api/preset/save|load|delete|new  {name}
+- POST /api/preset/import       {name, config}
+- POST /api/undo, /api/redo     -> {config}
+
+Every mutating endpoint snapshots the config for undo; history is in-memory
+only (a restart clears it, per the Milestone 12.5 spec).
 """
 
+import copy
 import json
 import logging
 import re
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from config import presets
 from config.loader import save_config
-from config.model import ACTION_TYPES, get_menu
+from config.model import ACTION_TYPES, PALETTE_SIZE, get_menu
 from state.manager import StateManager
 
 log = logging.getLogger("controller.web")
@@ -31,9 +44,12 @@ log = logging.getLogger("controller.web")
 STATIC_DIR = Path(__file__).parent / "static"
 
 MAX_LABEL_LENGTH = 24
+MAX_MENU_NAME_LENGTH = 24
+UNDO_LIMIT = 100
 SECONDARY_ACTION_TYPES = ("effect_cc", "action_cc", "program_change", "expression_pedal")
 
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+_PALETTE_REF_RE = re.compile(rf"^palette:[0-{PALETTE_SIZE - 1}]$")
 
 
 def _midi7(value, name):
@@ -48,9 +64,13 @@ def _channel(value):
     return value
 
 
-def _color(value, name):
+def _color(value, name, allow_palette=True):
+    """Action colors are literal #RRGGBB or a "palette:N" reference into the
+    shared ui.color_palette (linked colors, Milestone 12.5)."""
+    if allow_palette and isinstance(value, str) and _PALETTE_REF_RE.match(value):
+        return value
     if not isinstance(value, str) or not _COLOR_RE.match(value):
-        raise ValueError(f"{name} must be a #RRGGBB color")
+        raise ValueError(f"{name} must be a #RRGGBB color or palette:0-{PALETTE_SIZE - 1}")
     return value.upper()
 
 
@@ -167,6 +187,41 @@ def remove_secondary(state: StateManager, menu_id, button_num) -> dict:
     return slot
 
 
+def set_menu_name(config: dict, menu_id, name) -> dict:
+    if not isinstance(menu_id, int) or get_menu(config, menu_id) is None:
+        raise ValueError(f"unknown menu {menu_id!r}")
+    if not isinstance(name, str):
+        raise ValueError("name must be a string")
+    menu = get_menu(config, menu_id)
+    menu["name"] = name.strip()[:MAX_MENU_NAME_LENGTH] or f"Menu {menu_id}"
+    return {"menu_id": menu_id, "name": menu["name"]}
+
+
+def set_palette(config: dict, colors) -> list:
+    if not isinstance(colors, list) or len(colors) != PALETTE_SIZE:
+        raise ValueError(f"colors must be a list of {PALETTE_SIZE} #RRGGBB values")
+    palette = [_color(c, f"colors[{i}]", allow_palette=False) for i, c in enumerate(colors)]
+    config["ui"]["color_palette"] = palette
+    return palette
+
+
+def install_config(state: StateManager, new_config: dict) -> None:
+    """Swap a whole new config (preset load/new/import, undo/redo) into the
+    shared dict IN PLACE — the logic/render modules hold references to the
+    config object itself, so it must never be replaced wholesale."""
+    config = state.config
+    for key in [k for k in config if k not in new_config]:
+        del config[key]
+    for key, value in new_config.items():
+        config[key] = value
+    # The active pot mode may now point at a slot that is no longer an
+    # expression assignment; drop it rather than let ExpressionLogic read
+    # expression fields off a foreign type.
+    action = state.get_expression_action()
+    if action is None or action.get("type") != "expression_pedal":
+        state.expression_mode = None
+
+
 def _iter_all_actions(config: dict):
     for menu in config["menus"]:
         for slot in menu.get("slots", {}).values():
@@ -202,6 +257,10 @@ def apply_settings(config: dict, payload: dict) -> dict:
             raise ValueError("expression_panel_width_ratio must be between 0.05 and 0.3")
         updates["expression_panel_width_ratio"] = (
             config["ui"], "expression_panel_width_ratio", round(float(value), 3),
+        )
+    if "preset_name" in payload:
+        updates["preset_name"] = (
+            config, "preset_name", presets.validate_preset_name(payload["preset_name"]),
         )
     if not updates:
         raise ValueError("no editable settings in request")
@@ -240,12 +299,33 @@ class _Handler(BaseHTTPRequestHandler):
         self._respond(status, json.dumps(payload).encode(), "application/json")
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        path, _, query = self.path.partition("?")
+        if path in ("/", "/index.html"):
             self._respond(200, (STATIC_DIR / "index.html").read_bytes(),
                           "text/html; charset=utf-8")
-        elif self.path == "/api/config":
+        elif path == "/api/config":
             self._json(200, self.app.state.config)
-        elif self.path == "/api/status":
+        elif path == "/api/presets":
+            self._json(200, {"presets": presets.list_presets(),
+                             "current": self.app.state.config.get("preset_name", "")})
+        elif path == "/api/preset/export":
+            name = urllib.parse.parse_qs(query).get("name", [None])[0]
+            try:
+                config = presets.load_preset(name) if name else self.app.state.config
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)})
+                return
+            body = json.dumps(config, indent=2).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="{name or config.get("preset_name", "preset")}.json"',
+            )
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/api/status":
             state = self.app.state
             mode = state.expression_mode
             self._json(200, {
@@ -264,6 +344,15 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/slot/secondary": self.app.edit_secondary,
             "/api/slot/secondary/remove": self.app.edit_remove_secondary,
             "/api/settings": self.app.edit_settings,
+            "/api/menu": self.app.edit_menu,
+            "/api/palette": self.app.edit_palette,
+            "/api/preset/save": self.app.preset_save,
+            "/api/preset/load": self.app.preset_load,
+            "/api/preset/delete": self.app.preset_delete,
+            "/api/preset/new": self.app.preset_new,
+            "/api/preset/import": self.app.preset_import,
+            "/api/undo": self.app.undo,
+            "/api/redo": self.app.redo,
         }.get(self.path)
         if handler is None:
             self._json(404, {"error": "not found"})
@@ -296,14 +385,32 @@ class WebServer:
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._edit_lock = threading.Lock()
+        # Undo/redo history: full-config snapshots, in-memory only.
+        self._undo: list[dict] = []
+        self._redo: list[dict] = []
+
+    def _mutate(self, fn) -> dict:
+        """Run a config mutation under the edit lock: snapshot for undo,
+        apply, persist. A failed mutation may leave partial changes in the
+        live config, so restore the snapshot on any error."""
+        with self._edit_lock:
+            before = copy.deepcopy(self.state.config)
+            try:
+                result = fn()
+            except Exception:
+                install_config(self.state, before)
+                raise
+            self._undo.append(before)
+            del self._undo[:-UNDO_LIMIT]
+            self._redo.clear()
+            self.save(self.state.config)
+        return result
 
     def _slot_edit(self, payload: dict, fn, *args) -> dict:
         menu_id, button_num = payload.get("menu_id"), payload.get("button_num")
-        with self._edit_lock:
-            slot = fn(self.state, menu_id, button_num, *args)
-            self.save(self.state.config)
+        result = self._mutate(lambda: {"slot": fn(self.state, menu_id, button_num, *args)})
         log.info("web edit: menu %s B%s %s", menu_id, button_num, fn.__name__)
-        return {"slot": slot}
+        return result
 
     def edit_primary(self, payload: dict) -> dict:
         return self._slot_edit(payload, set_primary, payload.get("action"))
@@ -317,11 +424,94 @@ class WebServer:
         return self._slot_edit(payload, remove_secondary)
 
     def edit_settings(self, payload: dict) -> dict:
+        result = self._mutate(
+            lambda: {"settings": apply_settings(self.state.config, payload)}
+        )
+        log.info("web edit: settings %s", result["settings"])
+        return result
+
+    def edit_menu(self, payload: dict) -> dict:
+        result = self._mutate(lambda: {"menu": set_menu_name(
+            self.state.config, payload.get("menu_id"), payload.get("name"))})
+        log.info("web edit: menu name %s", result["menu"])
+        return result
+
+    def edit_palette(self, payload: dict) -> dict:
+        result = self._mutate(
+            lambda: {"palette": set_palette(self.state.config, payload.get("colors"))}
+        )
+        log.info("web edit: palette updated")
+        return result
+
+    # --- presets -------------------------------------------------------------
+
+    def preset_save(self, payload: dict) -> dict:
+        # Saving a preset file doesn't change the live config beyond its name.
+        name = payload.get("name")
+        result = self._mutate(lambda: self._do_preset_save(name))
+        log.info("preset saved: %s", name)
+        return result
+
+    def _do_preset_save(self, name) -> dict:
+        presets.save_preset(name, self.state.config)
+        self.state.config["preset_name"] = presets.validate_preset_name(name)
+        return {"presets": presets.list_presets()}
+
+    def preset_load(self, payload: dict) -> dict:
+        name = payload.get("name")
+        result = self._mutate(
+            lambda: self._install(presets.load_preset(name))
+        )
+        log.info("preset loaded: %s", name)
+        return result
+
+    def preset_new(self, payload: dict) -> dict:
+        name = payload.get("name")
+        result = self._mutate(
+            lambda: self._install(presets.new_preset_config(name))
+        )
+        log.info("new preset started: %s", name)
+        return result
+
+    def preset_import(self, payload: dict) -> dict:
+        name = payload.get("name")
+        with self._edit_lock:  # writes a preset file, not the live config
+            presets.import_preset(name, payload.get("config"))
+        log.info("preset imported: %s", name)
+        return {"presets": presets.list_presets()}
+
+    def preset_delete(self, payload: dict) -> dict:
+        name = payload.get("name")
         with self._edit_lock:
-            applied = apply_settings(self.state.config, payload)
+            presets.delete_preset(name)
+        log.info("preset deleted: %s", name)
+        return {"presets": presets.list_presets()}
+
+    def _install(self, new_config: dict) -> dict:
+        install_config(self.state, new_config)
+        return {"config": self.state.config}
+
+    # --- undo/redo -----------------------------------------------------------
+
+    def undo(self, payload: dict) -> dict:
+        with self._edit_lock:
+            if not self._undo:
+                raise ValueError("nothing to undo")
+            self._redo.append(copy.deepcopy(self.state.config))
+            install_config(self.state, self._undo.pop())
             self.save(self.state.config)
-        log.info("web edit: settings %s", applied)
-        return {"settings": applied}
+        log.info("web edit: undo (%d left)", len(self._undo))
+        return {"config": self.state.config}
+
+    def redo(self, payload: dict) -> dict:
+        with self._edit_lock:
+            if not self._redo:
+                raise ValueError("nothing to redo")
+            self._undo.append(copy.deepcopy(self.state.config))
+            install_config(self.state, self._redo.pop())
+            self.save(self.state.config)
+        log.info("web edit: redo (%d left)", len(self._redo))
+        return {"config": self.state.config}
 
     def start(self) -> None:
         web_cfg = self.state.config.get("web", {})

@@ -6,6 +6,7 @@ CONFIG_VERSION = 1
 
 DEFAULT_CONFIG = {
     "version": CONFIG_VERSION,
+    "preset_name": "Default",
     "device": {
         "name": "Pi MIDI Foot Controller",
         "hostname": "guitar-pedal",
@@ -14,6 +15,12 @@ DEFAULT_CONFIG = {
         "screen_width": 1920,
         "screen_height": 480,
         "expression_panel_width_ratio": 0.12,
+        # 10 shared palette slots. Action colors may reference one as
+        # "palette:N" (0-9); editing a slot recolors every reference.
+        "color_palette": [
+            "#00FF66", "#00CCFF", "#FF6600", "#3399FF", "#FFCC00",
+            "#CC66FF", "#FF3355", "#66FF99", "#FFFFFF", "#303030",
+        ],
         "theme": {
             "background": "#050505",
             "panel_background": "#111111",

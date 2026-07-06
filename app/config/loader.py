@@ -29,16 +29,24 @@ def load_config() -> dict:
     with CONFIG_PATH.open() as f:
         config = json.load(f)
 
-    if config.get("version") != CONFIG_VERSION:
-        raise ValueError(
-            f"config version {config.get('version')} unsupported "
-            f"(expected {CONFIG_VERSION}); migrations not implemented yet"
-        )
-    _fill_missing(config, default_config())
-    if _normalize_colors(config):
+    if prepare_config(config):
         log.info("migrated action colors to off_color/on_color model")
         save_config(config)
     return config
+
+
+def prepare_config(config: dict) -> bool:
+    """Validate the version and bring a raw config dict up to the current
+    schema (back-fill missing keys, migrate old color fields). Used for the
+    live config and for loaded/imported presets. Returns True if the color
+    migration changed anything."""
+    if not isinstance(config, dict) or config.get("version") != CONFIG_VERSION:
+        raise ValueError(
+            f"config version {config.get('version') if isinstance(config, dict) else None!r} "
+            f"unsupported (expected {CONFIG_VERSION})"
+        )
+    _fill_missing(config, default_config())
+    return _normalize_colors(config)
 
 
 # Pre-2026-07-06 configs used per-type color field names; the current model

@@ -298,6 +298,39 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   (page min-width 1000px). Clicking anywhere on a card that isn't an input
   selects it; shift-click multi-selects; mirrored editing unchanged.
 
+### Milestone 12.5 — Web App Editor Additions (2026-07-06)
+- **Color palette**: `ui.color_palette` (10 slots). Action colors are literal
+  `#RRGGBB` OR `"palette:N"` references — linked colors; editing a palette
+  slot (new Palette tab, `POST /api/palette`) recolors every reference.
+  `config/model.py resolve_color()` resolves refs at point of use (renderer
+  `_color()` wrapper, web `resolveColor()`); card color fields are a 10-swatch
+  picker + custom (unlinked) color input.
+- **Menu names**: `POST /api/menu {menu_id, name}` (empty -> "Menu n"); name
+  input on each menu tab; tabs/overview use it. Display B10 panel shows the
+  menu NAME (auto-fit via new `_fit_text` size-stepping helper) with "MENU n"
+  and "PGM n" beneath in the small font.
+- **Duplicate warnings** (web, non-blocking): note space (effect_cc+action_cc
+  cc_number) and program space checked across all menus/roles; warning names
+  the other assignment; "Use next available note" button for note types.
+- **Presets**: `config/presets.py`, files in CONFIG_DIR/presets/<name>.json
+  (deploys never touch them). Presets tab: save/save-as/load/delete/new/
+  import (client-side JSON file read) + export (Content-Disposition download,
+  `GET /api/preset/export?name=`). `preset_name` top-level config key,
+  editable in Global Settings; loading validates via `loader.prepare_config`
+  (refactored out of load_config). Name whitelist regex blocks path tricks.
+- **Undo/redo**: server-side full-config snapshots (in-memory, cap 100,
+  cleared on restart per spec) on EVERY mutating endpoint via
+  `WebServer._mutate` (also restores the snapshot if an edit raises
+  half-applied). `POST /api/undo|/api/redo` return the full config; header
+  buttons + Cmd/Ctrl(+Shift)+Z.
+- `install_config()` swaps whole configs (preset load/new, undo/redo) into
+  the shared dict IN PLACE — modules hold references to the config object —
+  and clears a stale expression mode. Renderer `theme` became a live property
+  for the same reason.
+- Verified on the Pi: palette/menu/undo/redo/preset save/export round-trips
+  over HTTP, bad preset name rejected, screenshot of B10 menu-name panel;
+  all test edits reverted (user config preserved). 113 unit tests passing.
+
 ## Current Milestone
 
 Milestone 13 — Image Upload
