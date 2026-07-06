@@ -1,0 +1,12 @@
+[Unit]
+Description=USB MIDI gadget (f_midi via configfs)
+After=local-fs.target
+Before=midi-controller.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/midi-controller/scripts/setup-usb-midi-gadget.sh
+
+[Install]
+WantedBy=multi-user.target

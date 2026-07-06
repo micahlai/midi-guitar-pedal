@@ -12,8 +12,14 @@ import time
 
 from config.loader import load_config
 from hardware import constants
+from hardware.adc import ExpressionInput
 from hardware.buttons import ButtonReader
+from hardware.constants import BUTTON_NUM_POWER
+from logic.actions import ActionLogic
+from logic.expression import ExpressionLogic
 from logic.menu import MenuLogic
+from logic.power import PowerLogic
+from logic.settings import SettingsLogic
 from midi.engine import MidiEngine
 from state.manager import StateManager
 from ui.renderer import UiRenderer
@@ -42,7 +48,7 @@ def main() -> int:
     log.info("config version %d loaded for %s", config["version"], config["device"]["name"])
 
     state = StateManager(config)
-    midi = MidiEngine(state)
+    midi = MidiEngine(state, config)
     ui = UiRenderer(state)
     web = WebServer(state)
 
@@ -52,7 +58,14 @@ def main() -> int:
     events: queue.Queue = queue.Queue()
     buttons = ButtonReader(config, events.put)
     buttons.start()
-    menu_logic = MenuLogic(config, state)
+    expression_input = ExpressionInput(config, state)
+    expression_input.start()
+
+    expression_logic = ExpressionLogic(config, state, midi)
+    action_logic = ActionLogic(config, state, midi, expression_logic)
+    menu_logic = MenuLogic(config, state, on_action_event=action_logic.on_button_event)
+    power_logic = PowerLogic(config, state)
+    settings_logic = SettingsLogic(state)
 
     running = True
 
@@ -73,14 +86,22 @@ def main() -> int:
         except queue.Empty:
             event = None
         if event is not None:
-            menu_logic.handle_event(event)
+            if event[0] == BUTTON_NUM_POWER:
+                power_logic.handle_event(event)
+            elif state.settings_open:
+                settings_logic.handle_event(event)
+            else:
+                menu_logic.handle_event(event)
         now = time.monotonic()
         menu_logic.tick(now)
+        power_logic.tick(now)
+        expression_logic.tick(now)
         if now >= next_heartbeat:
             log.info("heartbeat: menu %d", state.current_menu)
             next_heartbeat = now + HEARTBEAT_SECONDS
 
     buttons.stop()
+    expression_input.stop()
     for module in (web, ui, midi):
         module.stop()
     log.info("goodbye controller")

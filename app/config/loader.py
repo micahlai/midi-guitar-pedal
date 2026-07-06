@@ -34,7 +34,18 @@ def load_config() -> dict:
             f"config version {config.get('version')} unsupported "
             f"(expected {CONFIG_VERSION}); migrations not implemented yet"
         )
+    _fill_missing(config, default_config())
     return config
+
+
+def _fill_missing(config: dict, defaults: dict) -> None:
+    """Recursively add default keys absent from a same-version config, so
+    additive schema growth doesn't require a version bump."""
+    for key, value in defaults.items():
+        if key not in config:
+            config[key] = value
+        elif isinstance(value, dict) and isinstance(config[key], dict):
+            _fill_missing(config[key], value)
 
 
 def save_config(config: dict) -> None:

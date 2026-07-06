@@ -27,6 +27,8 @@ DEFAULT_CONFIG = {
         "shift_hold_seconds": 2.0,
         "secondary_hold_default_seconds": 1.5,
         "debounce_ms": 30,
+        "power_double_press_ms": 400,
+        "power_hold_seconds": 3.0,
     },
     "midi": {
         "usb_enabled": True,
@@ -44,7 +46,59 @@ DEFAULT_CONFIG = {
         "return_stop_threshold": 0.5,
     },
     "menus": [
-        {"id": 1, "name": "Menu 1", "slots": {}},
+        {
+            "id": 1,
+            "name": "Menu 1",
+            # Demo assignments exercising every action type; all editable via
+            # config.json (and the web app in later milestones).
+            "slots": {
+                "1": {"primary": {
+                    "type": "effect_cc", "midi_channel": 1, "cc_number": 21,
+                    "off_color": "#303030", "on_color": "#00FF66",
+                    "label": "DRIVE", "image_asset_id": None,
+                }},
+                "2": {"primary": {
+                    "type": "effect_cc", "midi_channel": 1, "cc_number": 22,
+                    "off_color": "#303030", "on_color": "#00CCFF",
+                    "label": "DELAY", "image_asset_id": None,
+                }},
+                "3": {"primary": {
+                    "type": "action_cc", "midi_channel": 1, "cc_number": 23,
+                    "default_color": "#303030", "pressed_color": "#FF6600",
+                    "label": "TAP", "image_asset_id": None,
+                }},
+                "4": {"primary": {
+                    "type": "program_change", "midi_channel": 1, "program_number": 0,
+                    "inactive_color": "#303030", "active_color": "#3399FF",
+                    "label": "RHYTHM", "image_asset_id": None,
+                }},
+                "5": {"primary": {
+                    "type": "program_change", "midi_channel": 1, "program_number": 1,
+                    "inactive_color": "#303030", "active_color": "#3399FF",
+                    "label": "LEAD", "image_asset_id": None,
+                }},
+                "6": {"primary": {
+                    "type": "expression_pedal", "midi_channel": 1, "cc_number": 7,
+                    "color": "#FFCC00", "label": "VOLUME", "image_asset_id": None,
+                    "value_min": 0, "value_max": 127, "reverse": False,
+                    "has_home": False, "home_value": 0,
+                }},
+                "7": {"primary": {
+                    "type": "expression_pedal", "midi_channel": 1, "cc_number": 11,
+                    "color": "#CC66FF", "label": "WAH", "image_asset_id": None,
+                    "value_min": 0, "value_max": 127, "reverse": False,
+                    "has_home": True, "home_value": 0,
+                }},
+                "8": {"primary": {
+                    "type": "nothing", "label": "", "color": "#1A1A1A",
+                }},
+                "9": {"primary": {
+                    "type": "effect_cc", "midi_channel": 1, "cc_number": 24,
+                    "off_color": "#303030", "on_color": "#00FF66",
+                    "label": "REVERB", "image_asset_id": None,
+                }},
+            },
+        },
         {"id": 2, "name": "Menu 2", "slots": {}},
         {"id": 3, "name": "Menu 3", "slots": {}},
         {"id": 4, "name": "Menu 4", "slots": {}},

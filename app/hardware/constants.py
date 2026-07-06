@@ -47,7 +47,12 @@ GPIO_BY_BUTTON = {
 }
 
 GPIO_POWER_BUTTON = 24
-GPIO_EXPRESSION_DETECT = 23
+# Event-stream button number for the power button (footswitches are 1-10).
+BUTTON_NUM_POWER = 0
+
+# Moved from draft GPIO 23 (now B5). Low = pedal plugged in (jack switch to
+# GND, internal pull-up).
+GPIO_EXPRESSION_DETECT = 25
 
 SPI_ADC_BUS = 0
 SPI_ADC_DEVICE = 0

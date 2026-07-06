@@ -7,11 +7,12 @@ HOST="${1:-pedal}"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 rsync -av --delete --exclude '__pycache__' "$REPO_DIR/app/" "$HOST:/opt/midi-controller/app/"
-rsync -av "$REPO_DIR/systemd/midi-controller.service" "$HOST:/tmp/midi-controller.service"
+rsync -av "$REPO_DIR/scripts/" "$HOST:/opt/midi-controller/scripts/"
+rsync -av "$REPO_DIR/systemd/" "$HOST:/tmp/systemd-units/"
 
 ssh "$HOST" '
   set -e
-  sudo install -m 644 /tmp/midi-controller.service /etc/systemd/system/midi-controller.service
+  sudo install -m 644 /tmp/systemd-units/*.service /etc/systemd/system/
   sudo systemctl daemon-reload
   sudo systemctl restart midi-controller
   sleep 2

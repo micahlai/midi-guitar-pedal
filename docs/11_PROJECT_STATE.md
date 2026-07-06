@@ -79,9 +79,73 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
 - Deployed; service logs "watching 10 buttons". Physical press verification
   awaits wired buttons.
 
+### Milestone 3 addendum — GPIO debugging (2026-07-05)
+- gpiozero `bounce_time` on the lgpio backend silently drops ALL events;
+  debounce is now done in `ButtonReader` (dedupe + 30 ms window), Buttons are
+  created without bounce_time. MenuLogic ignores orphaned shift releases.
+- User remapped pins in `hardware/constants.py` (B1=6, B2=13, B3=19, B4=5,
+  B5=23, shift=26). NOTE: B5 shares GPIO 23 with the draft expression-detect
+  pin — expression detect reassigned to GPIO 25 in Milestone 5.
+- Physical presses verified NOT reaching any of the 28 GPIOs (gpiomon, level
+  polls); wiring issue on user's bench (ground return / tact switch
+  orientation suspected). Software path verified end to end.
+
+### Milestone 4 — Power Button UI Behavior (2026-07-05, pending physical test)
+- Power button (GPIO 24) read as button 0 through the same ButtonReader.
+- `logic/power.py`: double press (400 ms window) toggles settings menu; hold
+  3.0 s logs shutdown stub. `logic/settings.py`: B6/B7 navigate, B9 select,
+  B10 exit (Exit item or B10 closes). Both pure logic.
+- Settings screen in renderer with footswitch legend; verified by headless
+  render. Config gained power_double_press_ms / power_hold_seconds; loader now
+  back-fills missing keys from defaults (additive schema growth, same version).
+- 20 unit tests passing.
+
+### Milestone 5 — SPI ADC Potentiometer (2026-07-05, pending pot hardware test)
+- `hardware/adc.py`: MCP3008 assumed (10-bit, swap `_read_raw()` if the real
+  chip differs); poll thread at 10 ms, EMA smoothing (alpha 0.3), writes
+  normalized 0-1 to state. Detect pin GPIO 25 (moved off 23 = user's B5), low
+  = plugged in via internal pull-up; drives state.expression_detected.
+- UI hides the expression strip and gives the grid full width when not
+  detected (verified by screenshot); bar direction respects reverse; home
+  value drawn as a marker line.
+- `dtparam=spi=on` added; `/dev/spidev0.0` present; ADC thread running.
+
+### Milestone 6 — Config Data Model (2026-07-05)
+- `config/model.py` slot/action accessors; defaults now populate Menu 1 with
+  demo assignments covering all five action types (DRIVE/DELAY effect_cc,
+  TAP action_cc, RHYTHM/LEAD program_change, VOLUME/WAH expression_pedal
+  incl. has_home, B8 nothing, REVERB effect_cc).
+- Renderer is fully config-driven: labels, per-type status bar colors
+  (effect state / pressed / current program / active expression mode),
+  "Hold for X" hint when a secondary exists. Verified by screenshot.
+- NOTE: Pi config.json predating the slots was regenerated from defaults;
+  loader back-fills missing keys but does not merge menu contents.
+
+### Milestone 7 — Basic MIDI Send (2026-07-05, pending DAW verification)
+- USB MIDI gadget via configfs (`scripts/setup-usb-midi-gadget.sh` +
+  `usb-midi-gadget.service`, `dtoverlay=dwc2,dr_mode=peripheral` under [all]
+  — beware the [cm5] section already has a dwc2 line). ALSA port `f_midi`
+  hw:1,0 confirmed; app opens it via mido/python-rtmidi (apt packages).
+- `logic/actions.py`: button events -> per-type dispatch (effect_cc/action_cc
+  send CC 127 on press, program_change sends PC, expression_pedal selects
+  mode, nothing inert). Secondary-hold semantics deferred to Milestone 10.
+- `logic/expression.py`: pot -> CC with min/max/reverse mapping, clamp,
+  deadband; exponential home-return (alpha 0.15 / 30 ms / stop 0.5) when
+  switching away from a has_home mode; pot movement cancels an active return.
+- 31 unit tests passing.
+- USB enumeration verified (2026-07-05): Mac enumerates "Pi MIDI Foot
+  Controller" (UDC state `configured`) when the laptop feeds the Pi's USB
+  data port directly (single cable, also powering the Pi). With separate
+  wall power on PWR IN + laptop on the data port it read `not attached` —
+  retest dual-power arrangement if needed later. Overlay is plain
+  `dtoverlay=dwc2` (OTG default). Test CC/PC messages sent via ALSA seq
+  (rawmidi is held by the app; use mido/seq for manual test sends).
+- Pending: physical buttons (Milestone 3 wiring issue) to fire real actions;
+  pot movement on screen.
+
 ## Current Milestone
 
-Milestone 3 — GPIO Buttons (physical verification), then Milestone 4
+Milestone 8 — MIDI Receive and State Sync
 
 ## Decisions Made
 

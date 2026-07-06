@@ -14,7 +14,10 @@ ignored, with same-state edges deduplicated.
 import logging
 import time
 
-from hardware.constants import GPIO_BY_BUTTON
+from hardware.constants import BUTTON_NUM_POWER, GPIO_BY_BUTTON, GPIO_POWER_BUTTON
+
+# All watched inputs: footswitches B1-B10 plus the power button.
+WATCHED_PINS = {**GPIO_BY_BUTTON, BUTTON_NUM_POWER: GPIO_POWER_BUTTON}
 
 log = logging.getLogger("controller.hw.buttons")
 
@@ -51,7 +54,7 @@ class ButtonReader:
             )
 
         try:
-            for num, pin in GPIO_BY_BUTTON.items():
+            for num, pin in WATCHED_PINS.items():
                 button = Button(pin, pull_up=True)
                 button.when_pressed, button.when_released = make_handlers(num)
                 self._buttons.append(button)
