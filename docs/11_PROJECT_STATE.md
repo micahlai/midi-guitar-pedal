@@ -209,9 +209,39 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
 - 60 unit tests passing (12 new: edit logic + HTTP round-trip on port 0 with
   an injected save stub).
 
+### Milestone 12 — Full Web App Editor (2026-07-05)
+- API reworked (old `/api/slot` replaced): `POST /api/slot/primary` and
+  `/api/slot/secondary` take FULL action dicts, validated per type
+  (channel 1-16, note/CC/PC 0-127, #RRGGBB colors normalized to uppercase,
+  bools; unknown fields stripped). Secondary: types restricted to
+  effect_cc/action_cc/program_change, no image, hold_seconds 0.2-10,
+  requires a primary. `/api/slot/secondary/remove` deletes it.
+- `POST /api/settings`: shift_hold_seconds (0.5-10),
+  secondary_hold_default_seconds (0.2-10), expression_panel_width_ratio
+  (0.05-0.3). `GET /api/status` returns live menu/program/expression state
+  for the sidebar preview (polled every 2 s).
+- Stale-cache fixes so web edits apply live without restart: MenuLogic
+  shift hold, ActionLogic default secondary hold, and renderer expression
+  panel ratio are now read from config at point of use (were cached at
+  init). The expression-mode guard now also covers secondary edits/removal.
+- Editor UI: slot cells (label, type/note/channel summary, swatch, "Hold Xs
+  for Y" line) open a modal with Primary/Secondary tabs per spec 5 —
+  type-specific field forms, add/remove secondary, per-slot hold seconds.
+  Sidebar: hold settings, expression panel width slider, live status box
+  (menu, program, pedal detected, active mode, pot value bar).
+- Client keeps per-type templates; switching type in the modal carries over
+  label + channel. Save posts primary, then secondary set/remove as needed.
+- VERIFIED against the Pi: full-field expression primary, secondary with
+  custom hold, settings write, status endpoint, and a 400 on an
+  expression-type secondary. Demo edits reverted afterwards — NOTE: the
+  user already has real edits in Menu 1 (made via the M11 editor, see
+  journal "web edit" lines), so the Pi config is user data now; don't
+  regenerate it from defaults.
+- 66 unit tests passing (18 web: validation, slot edits, settings, HTTP).
+
 ## Current Milestone
 
-Milestone 12 — Full Web App Editor
+Milestone 13 — Image Upload
 
 ## Decisions Made
 
@@ -253,9 +283,8 @@ Milestone 12 — Full Web App Editor
 
 ## Next Actions
 
-1. Milestone 12: all per-type fields in the web editor (channels, CC/note
-   numbers, colors, program numbers, expression min/max/reverse/home).
-2. Secondary action tab system (add/remove, hold seconds).
-3. Expression settings sidebar + panel width + shift hold duration settings.
-4. Still pending from earlier: physical button wiring (Milestone 3) and pot
+1. Milestone 13: image upload (resize/store server-side, render on button
+   panels, expression type image; stdlib-only resize may need Pillow — check
+   RAM footprint on the Zero 2 W).
+2. Still pending from earlier: physical button wiring (Milestone 3) and pot
    hardware (Milestone 5) bench verification.

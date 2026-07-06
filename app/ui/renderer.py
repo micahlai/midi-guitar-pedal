@@ -33,7 +33,6 @@ class UiRenderer:
     def __init__(self, state: StateManager):
         self.state = state
         self.theme = state.config["ui"]["theme"]
-        self.exp_ratio = state.config["ui"]["expression_panel_width_ratio"]
         self._thread: threading.Thread | None = None
         self._running = False
         self.screenshot_requested = False
@@ -122,7 +121,8 @@ class UiRenderer:
         # Expression strip: only when the pedal/pot is detected; the grid
         # takes the full width otherwise (docs/08_EXPRESSION_PEDAL_SPEC.md).
         show_exp = self.state.expression_detected
-        exp_width = int(surface.get_width() * self.exp_ratio) if show_exp else 0
+        exp_ratio = self.state.config["ui"]["expression_panel_width_ratio"]
+        exp_width = int(surface.get_width() * exp_ratio) if show_exp else 0
         grid_width = surface.get_width() - exp_width
         if show_exp:
             self._draw_expression(pygame, surface, font_small, grid_width, exp_width)

@@ -34,7 +34,6 @@ class ActionLogic:
         self.state = state
         self.midi = midi
         self.expression = expression  # ExpressionLogic, for mode switches
-        self.default_hold_s = config["buttons"]["secondary_hold_default_seconds"]
         # Buttons waiting to resolve primary vs secondary:
         # num -> {"pressed_at": t, "slot": slot, "menu": menu_id}
         self._pending: dict[int, dict] = {}
@@ -49,7 +48,9 @@ class ActionLogic:
 
     def tick(self, t: float) -> None:
         for num, pending in list(self._pending.items()):
-            hold_s = pending["slot"]["secondary"].get("hold_seconds", self.default_hold_s)
+            hold_s = pending["slot"]["secondary"].get(
+                "hold_seconds", self.config["buttons"]["secondary_hold_default_seconds"]
+            )
             if t - pending["pressed_at"] >= hold_s:
                 del self._pending[num]
                 secondary = get_secondary_action(pending["slot"])

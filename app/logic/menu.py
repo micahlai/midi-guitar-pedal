@@ -25,7 +25,7 @@ log = logging.getLogger("controller.logic.menu")
 class MenuLogic:
     def __init__(self, config: dict, state, on_action_event=None):
         self.state = state
-        self.shift_hold_seconds = config["buttons"]["shift_hold_seconds"]
+        self.config = config  # shift hold read live so web edits apply
         # Called with (button_num, "press"|"release", t) for assignable
         # buttons that are not suppressed; logic/actions.py maps these to actions.
         self.on_action_event = on_action_event or (lambda num, kind, t: None)
@@ -46,7 +46,7 @@ class MenuLogic:
         if (
             self._shift_down_at is not None
             and not self._shift_consumed
-            and t - self._shift_down_at >= self.shift_hold_seconds
+            and t - self._shift_down_at >= self.config["buttons"]["shift_hold_seconds"]
         ):
             self._shift_consumed = True
             self._set_menu(4, "shift hold")
