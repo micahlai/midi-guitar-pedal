@@ -110,17 +110,34 @@
   .expbar { height: 8px; background: #0f0f0f; border-radius: 4px; overflow: hidden; }
   .expbar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
 
-  /* ---- color picker (palette swatches + custom) ---- */
-  .pal-row { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; }
-  .pal-sw {
-    width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--border);
-    cursor: pointer; padding: 0;
+  /* ---- color picker (popover: palette grid + custom) ---- */
+  .cp { position: relative; }
+  .cp-current {
+    display: flex; align-items: center; gap: 7px; width: 100%;
+    background: #0f0f0f; border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 7px; color: var(--text); font-size: 12px; cursor: pointer;
   }
-  .pal-sw.active, .pal-custom.active { outline: 2px solid var(--accent); }
-  .pal-custom { width: 26px; height: 18px; padding: 0 1px; background: #0f0f0f;
-    border: 1px solid var(--border); border-radius: 5px; cursor: pointer; }
+  .cp-current .sw {
+    width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border);
+    flex: none;
+  }
+  .cp-pop {
+    position: absolute; z-index: 10; top: 100%; left: 0; margin-top: 4px;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px; width: 172px; box-shadow: 0 4px 16px rgba(0,0,0,.55);
+  }
+  .cp-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 8px;
+  }
+  .cp-grid button {
+    width: 100%; aspect-ratio: 1; border-radius: 5px;
+    border: 1px solid var(--border); cursor: pointer; padding: 0;
+  }
+  .cp-grid button.active { outline: 2px solid var(--accent); }
+  .cp-custom { width: 100%; }
   .warn { grid-column: 1 / -1; color: #ffbb33; font-size: 11px; margin: -3px 0 5px; }
-  .warn .btn { padding: 2px 8px; font-size: 11px; margin-left: 6px; }
+  .next-note { grid-column: 1 / -1; margin: -3px 0 5px; }
+  .next-note .btn { padding: 3px 9px; font-size: 11px; }
 
   /* ---- header undo/redo ---- */
   .hdr-btn {
@@ -667,27 +684,71 @@ function setField(n, role, key, value, structural) {
   });
 }
 
-// Palette swatches (linked colors) + a custom color input (unlinked).
+// MIDI note name in the MainStage/Logic convention (C3 = 60), e.g. 66 -> F#3.
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+function noteName(n) {
+  return NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 2);
+}
+
+function nextAvailableNote() {
+  const used = new Set(collectUses("note").map(u => u.value));
+  let v = 0;
+  while (used.has(v) && v < 127) v++;
+  return v;
+}
+
+// Compact picker: shows the current color; clicking opens a popover with the
+// 10 palette slots in a 5x2 grid (linked) and a "not on palette" button that
+// opens a native color input (unlinked custom color).
 function colorPicker(n, role, key, action) {
-  const row = document.createElement("div");
-  row.className = "pal-row";
   const value = action[key];
+  const isPalette = String(value).startsWith("palette:");
+  const wrap = document.createElement("div");
+  wrap.className = "cp";
+
+  const current = document.createElement("button");
+  current.className = "cp-current";
+  const sw = document.createElement("span");
+  sw.className = "sw";
+  sw.style.background = resolveColor(value);
+  const text = document.createElement("span");
+  text.textContent = isPalette
+    ? `Palette ${parseInt(String(value).slice(8), 10) + 1}` : value;
+  current.append(sw, text);
+  wrap.appendChild(current);
+
+  const pop = document.createElement("div");
+  pop.className = "cp-pop";
+  pop.hidden = true;
+  const grid = document.createElement("div");
+  grid.className = "cp-grid";
   config.ui.color_palette.forEach((hex, i) => {
     const b = document.createElement("button");
-    b.className = "pal-sw" + (value === `palette:${i}` ? " active" : "");
+    b.className = value === `palette:${i}` ? "active" : "";
     b.style.background = hex;
     b.title = `Palette ${i + 1} (${hex}) — linked`;
     b.onclick = e => { e.preventDefault(); setField(n, role, key, `palette:${i}`, true); };
-    row.appendChild(b);
+    grid.appendChild(b);
   });
+  pop.appendChild(grid);
+
   const custom = document.createElement("input");
   custom.type = "color";
-  custom.className = "pal-custom" + (String(value).startsWith("palette:") ? "" : " active");
+  custom.hidden = true;
   custom.value = resolveColor(value);
-  custom.title = "Custom color (not linked to the palette)";
   custom.onchange = () => setField(n, role, key, custom.value.toUpperCase(), true);
-  row.appendChild(custom);
-  return row;
+  const customBtn = document.createElement("button");
+  customBtn.className = "btn cp-custom";
+  customBtn.textContent = "Choose color not on palette";
+  customBtn.onclick = e => { e.preventDefault(); custom.click(); };
+  pop.append(customBtn, custom);
+  wrap.appendChild(pop);
+
+  current.onclick = e => {
+    e.preventDefault();
+    pop.hidden = !pop.hidden;
+  };
+  return wrap;
 }
 
 /* ---------- duplicate note / program warnings ---------- */
@@ -724,19 +785,6 @@ function duplicateWarning(n, role, key, action) {
   const menuName = menuById(other.menu).name || `Menu ${other.menu}`;
   div.textContent = `Warning: ${action[key]} is used for ${other.label || "B" + other.btn} ` +
     `(${menuName} · B${other.btn}${other.role === "secondary" ? " hold" : ""})`;
-  if (space === "note") {
-    const b = document.createElement("button");
-    b.className = "btn";
-    b.textContent = "Use next available note";
-    b.onclick = e => {
-      e.preventDefault();
-      const used = new Set(collectUses("note").map(u => u.value));
-      let v = 0;
-      while (used.has(v) && v < 127) v++;
-      setField(n, role, key, v, true);
-    };
-    div.appendChild(b);
-  }
   return div;
 }
 
@@ -817,7 +865,29 @@ function actionForm(n, role) {
       const v = parseInt(input.value, 10);
       if (!isNaN(v)) setField(n, role, key, v, structural);
     };
-    pairs.appendChild(field(name, input));
+    // Notes are entered as numbers but shown with their name too (C3 = 60).
+    const isNote = key === "cc_number" && (action.type === "effect_cc" || action.type === "action_cc");
+    const f = field(isNote ? `${name} (${noteName(action[key])})` : name, input);
+    if (isNote) {
+      const labelEl = f.querySelector("label");
+      input.oninput = () => {
+        const v = parseInt(input.value, 10);
+        labelEl.textContent = isNaN(v) || v < 0 || v > 127
+          ? name : `${name} (${noteName(v)})`;
+      };
+    }
+    pairs.appendChild(f);
+    if (isNote) {
+      const next = nextAvailableNote();
+      const row = document.createElement("div");
+      row.className = "next-note";
+      const b = document.createElement("button");
+      b.className = "btn";
+      b.textContent = `Use next available: ${next} (${noteName(next)})`;
+      b.onclick = e => { e.preventDefault(); setField(n, role, key, next, true); };
+      row.appendChild(b);
+      pairs.appendChild(row);
+    }
     const warn = duplicateWarning(n, role, key, action);
     if (warn) pairs.appendChild(warn);
   }

@@ -408,6 +408,18 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   "Pi MIDI Foot Controller"; a CoreBluetooth scan from the CLI was blocked
   by macOS Bluetooth TCC permissions). 142 unit tests passing.
 
+### Post-M14 — editor UX tweaks (2026-07-06, user-directed)
+- Card color fields no longer show the 10 palette swatches inline: a compact
+  current-color button opens a popover with the palette in a 5x2 grid and a
+  full-width "Choose color not on palette" button (opens the native color
+  input -> unlinked custom color).
+- Note numbers (effect_cc/action_cc) show their NOTE NAME next to the label,
+  MainStage/Logic convention C3 = 60 (e.g. 66 -> F#3), live while typing;
+  input stays numeric. "Use next available: N (name)" button now shows at
+  ALL times (was only inside the duplicate warning).
+- NOT yet verified in a browser — the Pi was powered off when this landed;
+  JS syntax node-checked only. Deploy + click through on next power-up.
+
 ## Current Milestone
 
 Milestone 15 — Settings Menu (next up)
