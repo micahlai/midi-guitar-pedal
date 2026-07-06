@@ -31,7 +31,7 @@ log = logging.getLogger("controller.web")
 STATIC_DIR = Path(__file__).parent / "static"
 
 MAX_LABEL_LENGTH = 24
-SECONDARY_ACTION_TYPES = ("effect_cc", "action_cc", "program_change")
+SECONDARY_ACTION_TYPES = ("effect_cc", "action_cc", "program_change", "expression_pedal")
 
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -66,9 +66,13 @@ def _seconds(value, name, lo, hi):
     return round(float(value), 2)
 
 
-def validate_action(raw, allowed_types, allow_image: bool, pc_base: int = 0) -> dict:
+def validate_action(raw, allowed_types, secondary: bool, pc_base: int = 0) -> dict:
     """Validate a full action dict from the client, returning a normalized
-    copy with exactly the fields the config schema defines for its type."""
+    copy with exactly the fields the config schema defines for its type.
+
+    Color model: primaries carry off_color + on_color; secondaries carry
+    on_color only (and never an image).
+    """
     if not isinstance(raw, dict):
         raise ValueError("action must be an object")
     action_type = raw.get("type")
@@ -86,21 +90,17 @@ def validate_action(raw, allowed_types, allow_image: bool, pc_base: int = 0) -> 
         "type": action_type,
         "midi_channel": _channel(raw.get("midi_channel")),
         "label": label,
+        "on_color": _color(raw.get("on_color"), "on_color"),
     }
-    if allow_image:
+    if not secondary:
+        action["off_color"] = _color(raw.get("off_color"), "off_color")
         image = raw.get("image_asset_id")
         if image is not None and not isinstance(image, str):
             raise ValueError("image_asset_id must be a string or null")
         action["image_asset_id"] = image
 
-    if action_type == "effect_cc":
+    if action_type in ("effect_cc", "action_cc"):
         action["cc_number"] = _midi7(raw.get("cc_number"), "cc_number")
-        action["off_color"] = _color(raw.get("off_color"), "off_color")
-        action["on_color"] = _color(raw.get("on_color"), "on_color")
-    elif action_type == "action_cc":
-        action["cc_number"] = _midi7(raw.get("cc_number"), "cc_number")
-        action["default_color"] = _color(raw.get("default_color"), "default_color")
-        action["pressed_color"] = _color(raw.get("pressed_color"), "pressed_color")
     elif action_type == "program_change":
         # Stored in the rig's numbering: wire value + program_display_base.
         number = raw.get("program_number")
@@ -110,11 +110,8 @@ def validate_action(raw, allowed_types, allow_image: bool, pc_base: int = 0) -> 
                 f"program_number must be an integer {pc_base}-{127 + pc_base}"
             )
         action["program_number"] = number
-        action["inactive_color"] = _color(raw.get("inactive_color"), "inactive_color")
-        action["active_color"] = _color(raw.get("active_color"), "active_color")
     elif action_type == "expression_pedal":
         action["cc_number"] = _midi7(raw.get("cc_number"), "cc_number")
-        action["color"] = _color(raw.get("color"), "color")
         action["value_min"] = _midi7(raw.get("value_min"), "value_min")
         action["value_max"] = _midi7(raw.get("value_max"), "value_max")
         action["reverse"] = _bool(raw.get("reverse"), "reverse")
@@ -143,7 +140,7 @@ def _clear_stale_expression_mode(state: StateManager, menu_id, button_num, role,
 
 
 def set_primary(state: StateManager, menu_id, button_num, raw_action) -> dict:
-    action = validate_action(raw_action, ACTION_TYPES, allow_image=True,
+    action = validate_action(raw_action, ACTION_TYPES, secondary=False,
                              pc_base=state.config["midi"]["program_display_base"])
     slot = _get_slot_for_edit(state, menu_id, button_num)
     slot["primary"] = action
@@ -152,7 +149,7 @@ def set_primary(state: StateManager, menu_id, button_num, raw_action) -> dict:
 
 
 def set_secondary(state: StateManager, menu_id, button_num, hold_seconds, raw_action) -> dict:
-    action = validate_action(raw_action, SECONDARY_ACTION_TYPES, allow_image=False,
+    action = validate_action(raw_action, SECONDARY_ACTION_TYPES, secondary=True,
                              pc_base=state.config["midi"]["program_display_base"])
     hold = _seconds(hold_seconds, "hold_seconds", 0.2, 10.0)
     slot = _get_slot_for_edit(state, menu_id, button_num)

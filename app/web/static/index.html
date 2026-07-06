@@ -32,13 +32,15 @@
     flex: 1; padding: 16px; background: var(--panel2);
     border: 1px solid var(--border); border-radius: 0 8px 8px 8px;
   }
+  .hint { color: var(--dim); font-size: 12px; margin: 10px 2px 0; }
   .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
   .cell {
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
     padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px;
-    cursor: pointer; min-height: 96px;
+    cursor: pointer; min-height: 96px; user-select: none;
   }
-  .cell:hover { border-color: var(--accent); }
+  .cell:hover { border-color: var(--dim); }
+  .cell.selected { border-color: var(--accent); }
   .cell .head { display: flex; align-items: center; gap: 8px; }
   .cell .num { font-size: 12px; color: var(--dim); font-weight: 600; }
   .cell .swatch {
@@ -52,51 +54,48 @@
     justify-content: center; align-items: center; color: var(--dim);
     border-style: dashed; cursor: default;
   }
+  .editors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px 14px;
+  }
+  .card.selected { border-color: var(--accent); }
+  .card h3 {
+    margin: 0 0 10px; font-size: 13px; color: var(--dim); font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card h3 .sec-tag { color: var(--accent); font-weight: 400; margin-left: auto; font-size: 12px; }
+  .card .divider {
+    border-top: 1px solid var(--border); margin: 12px -14px 12px;
+  }
+  .card h4 { margin: 0 0 8px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .field label { font-size: 12px; color: var(--dim); }
+  .field input[type=text], .field input[type=number], .field select {
+    background: #0f0f0f; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; font-size: 14px; width: 100%;
+  }
+  .field input[type=color] { width: 100%; height: 30px; padding: 2px; background: #0f0f0f;
+    border: 1px solid var(--border); border-radius: 6px; }
+  .field input:focus, .field select:focus { outline: 1px solid var(--accent); }
+  .check { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer;
+  }
+  .btn.danger { color: var(--err); border-color: var(--err); }
   aside {
     width: 300px; background: var(--panel2); border: 1px solid var(--border);
     border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 18px;
   }
   aside h2 { font-size: 13px; margin: 0; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
-  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-  .field label { font-size: 12px; color: var(--dim); }
-  .field input[type=text], .field input[type=number], .field select {
-    background: #0f0f0f; color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 7px 9px; font-size: 14px; width: 100%;
-  }
-  .field input[type=color] { width: 100%; height: 34px; padding: 2px; background: #0f0f0f;
-    border: 1px solid var(--border); border-radius: 6px; }
-  .field input:focus, .field select:focus { outline: 1px solid var(--accent); }
-  .check { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 14px; }
-  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  aside .field select, aside .field input { width: 100%; }
   #statusbox { font-size: 13px; color: var(--dim); display: flex; flex-direction: column; gap: 5px; }
   #statusbox b { color: var(--text); font-weight: 600; }
   .expbar { height: 8px; background: #0f0f0f; border-radius: 4px; overflow: hidden; }
   .expbar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
-  /* modal */
-  #overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,.65); display: none;
-    align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto;
-  }
-  #overlay.open { display: flex; }
-  #modal {
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 10px;
-    width: 460px; max-width: 100%; padding: 18px 20px 20px;
-  }
-  #modal h2 { margin: 0 0 12px; font-size: 16px; }
-  .modaltabs { display: flex; gap: 6px; margin-bottom: 14px; }
-  .modaltabs button {
-    background: var(--panel); color: var(--dim); border: 1px solid var(--border);
-    border-radius: 6px; padding: 7px 18px; font-size: 14px; cursor: pointer;
-  }
-  .modaltabs button.active { color: var(--text); border-color: var(--accent); }
-  .btn {
-    background: var(--panel); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 8px 16px; font-size: 14px; cursor: pointer;
-  }
-  .btn.primary { background: var(--accent); color: #04120c; border-color: var(--accent); font-weight: 600; }
-  .btn.danger { color: var(--err); border-color: var(--err); }
-  .modalfoot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
-  .modalfoot .danger { margin-right: auto; }
+  @media (max-width: 1250px) { .editors { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 1000px) { .layout { flex-direction: column; } aside { width: 100%; } }
 </style>
 </head>
@@ -108,7 +107,12 @@
 </header>
 <nav id="tabs"></nav>
 <div class="layout">
-  <main><div class="grid" id="grid"></div></main>
+  <main>
+    <div class="grid" id="grid"></div>
+    <div class="hint">Click a button to jump to its settings. Shift-click to select
+      several — a change to one selected button applies to all of them.</div>
+    <div class="editors" id="editors"></div>
+  </main>
   <aside>
     <div>
       <h2>Hold Settings</h2>
@@ -145,35 +149,27 @@
   </aside>
 </div>
 
-<div id="overlay">
-  <div id="modal">
-    <h2 id="modal-title"></h2>
-    <div class="modaltabs" id="modal-tabs"></div>
-    <div id="modal-form"></div>
-    <div class="modalfoot" id="modal-foot"></div>
-  </div>
-</div>
-
 <script>
 const TYPE_NAMES = {
   effect_cc: "Effect CC", action_cc: "Action CC", program_change: "Program Change",
   expression_pedal: "Expression Pedal", nothing: "Nothing",
 };
 const PRIMARY_TYPES = ["effect_cc", "action_cc", "program_change", "expression_pedal", "nothing"];
-const SECONDARY_TYPES = ["effect_cc", "action_cc", "program_change"];
+const SECONDARY_TYPES = ["effect_cc", "action_cc", "program_change", "expression_pedal"];
+// Color model: primaries have off_color + on_color; secondaries on_color only.
 const TEMPLATES = {
   effect_cc: { type: "effect_cc", midi_channel: 1, cc_number: 20,
     off_color: "#303030", on_color: "#00FF66", label: "", image_asset_id: null },
   action_cc: { type: "action_cc", midi_channel: 1, cc_number: 20,
-    default_color: "#303030", pressed_color: "#FF6600", label: "", image_asset_id: null },
+    off_color: "#303030", on_color: "#FF6600", label: "", image_asset_id: null },
   program_change: { type: "program_change", midi_channel: 1, program_number: 0,
-    inactive_color: "#303030", active_color: "#3399FF", label: "", image_asset_id: null },
+    off_color: "#303030", on_color: "#3399FF", label: "", image_asset_id: null },
   expression_pedal: { type: "expression_pedal", midi_channel: 1, cc_number: 7,
-    color: "#FFCC00", value_min: 0, value_max: 127, reverse: false,
-    has_home: false, home_value: 0, label: "", image_asset_id: null },
+    off_color: "#303030", on_color: "#FFCC00", value_min: 0, value_max: 127,
+    reverse: false, has_home: false, home_value: 0, label: "", image_asset_id: null },
   nothing: { type: "nothing", label: "", color: "#1A1A1A" },
 };
-// [key, label, kind]; kind: chan | midi7 | color | bool
+// [key, label, kind]; kind: chan | midi7 | pc | color | bool
 const FIELDS = {
   effect_cc: [
     ["midi_channel", "MIDI channel", "chan"], ["cc_number", "Note number", "midi7"],
@@ -181,15 +177,15 @@ const FIELDS = {
   ],
   action_cc: [
     ["midi_channel", "MIDI channel", "chan"], ["cc_number", "Note number", "midi7"],
-    ["default_color", "Default color", "color"], ["pressed_color", "Pressed color", "color"],
+    ["off_color", "Off color", "color"], ["on_color", "On color", "color"],
   ],
   program_change: [
     ["midi_channel", "MIDI channel", "chan"], ["program_number", "Program number", "pc"],
-    ["inactive_color", "Inactive color", "color"], ["active_color", "Active color", "color"],
+    ["off_color", "Off color", "color"], ["on_color", "On color", "color"],
   ],
   expression_pedal: [
     ["midi_channel", "MIDI channel", "chan"], ["cc_number", "CC number", "midi7"],
-    ["color", "Color", "color"],
+    ["off_color", "Off color", "color"], ["on_color", "On color", "color"],
     ["value_min", "Value min", "midi7"], ["value_max", "Value max", "midi7"],
     ["reverse", "Reverse direction", "bool"],
     ["has_home", "Return to home value", "bool"], ["home_value", "Home value", "midi7"],
@@ -199,7 +195,8 @@ const FIELDS = {
 
 let config = null;
 let currentMenu = 1;
-let edit = null; // {menuId, n, tab, primary, secondary, hadSecondary}
+let selected = new Set(); // multi-edit selection (button numbers, current menu)
+let edits = {};           // n -> {primary, secondary} working copies
 
 const $ = id => document.getElementById(id);
 const statusEl = $("status");
@@ -233,12 +230,21 @@ function actionMeta(a) {
     default: return "Nothing";
   }
 }
-function actionColor(a) {
-  if (!a) return "#0f0f0f";
-  return a.on_color || a.pressed_color || a.active_color || a.color || "#0f0f0f";
+function actionColor(a) { return (a && (a.on_color || a.color)) || "#0f0f0f"; }
+
+function buildEdits() {
+  edits = {};
+  for (let n = 1; n <= 9; n++) {
+    const slot = slotOf(currentMenu, n) || {};
+    edits[n] = {
+      primary: structuredClone(slot.primary || TEMPLATES.nothing),
+      secondary: slot.secondary && slot.secondary.enabled
+        ? structuredClone(slot.secondary) : null,
+    };
+  }
 }
 
-/* ---------- grid ---------- */
+/* ---------- tabs + panel grid ---------- */
 
 function renderTabs() {
   const nav = $("tabs");
@@ -247,7 +253,7 @@ function renderTabs() {
     const b = document.createElement("button");
     b.textContent = menu.name || `Menu ${menu.id}`;
     b.className = menu.id === currentMenu ? "active" : "";
-    b.onclick = () => { currentMenu = menu.id; render(); };
+    b.onclick = () => { currentMenu = menu.id; selected.clear(); render(); };
     nav.appendChild(b);
   }
 }
@@ -263,7 +269,8 @@ function renderGrid() {
       grid.appendChild(cell);
       continue;
     }
-    cell.className = "cell";
+    cell.className = "cell" + (selected.has(n) ? " selected" : "");
+    cell.id = "cell-" + n;
     const slot = slotOf(currentMenu, n);
     const a = slot && slot.primary;
     const sec = slot && slot.secondary && slot.secondary.enabled ? slot.secondary : null;
@@ -277,29 +284,108 @@ function renderGrid() {
     cell.querySelector(".meta").textContent = actionMeta(a);
     cell.querySelector(".hold").textContent =
       sec ? `Hold ${sec.hold_seconds}s for ${sec.action.label || TYPE_NAMES[sec.action.type]}` : "";
-    cell.onclick = () => openEditor(currentMenu, n);
+    cell.onclick = e => {
+      if (e.shiftKey) {
+        selected.has(n) ? selected.delete(n) : selected.add(n);
+      } else {
+        selected = new Set([n]);
+        const card = $("card-" + n);
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+      refreshSelection();
+    };
     grid.appendChild(cell);
   }
 }
 
-function render() { renderTabs(); renderGrid(); }
-
-/* ---------- slot editor modal ---------- */
-
-function openEditor(menuId, n) {
-  const slot = slotOf(menuId, n) || {};
-  edit = {
-    menuId, n, tab: "primary",
-    primary: structuredClone(slot.primary || TEMPLATES.nothing),
-    secondary: slot.secondary && slot.secondary.enabled ? structuredClone(slot.secondary) : null,
-    hadSecondary: !!(slot.secondary && slot.secondary.enabled),
-  };
-  $("modal-title").textContent = `Menu ${menuId} — Button ${n}`;
-  renderModal();
-  $("overlay").classList.add("open");
+function refreshSelection() {
+  for (let n = 1; n <= 9; n++) {
+    const cell = $("cell-" + n), card = $("card-" + n);
+    if (cell) cell.classList.toggle("selected", selected.has(n));
+    if (card) card.classList.toggle("selected", selected.has(n));
+  }
 }
-function closeEditor() { $("overlay").classList.remove("open"); edit = null; }
-$("overlay").onclick = e => { if (e.target === $("overlay")) closeEditor(); };
+
+/* ---------- editor cards ---------- */
+
+function render() { renderTabs(); renderGrid(); buildEdits(); renderEditors(); }
+
+function renderEditors() {
+  const wrap = $("editors");
+  wrap.innerHTML = "";
+  for (let n = 1; n <= 9; n++) wrap.appendChild(buildCard(n));
+  refreshSelection();
+}
+
+function rebuildCard(n) {
+  const old = $("card-" + n);
+  if (old) old.replaceWith(buildCard(n));
+  refreshSelection();
+}
+
+function buildCard(n) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.id = "card-" + n;
+  const edit = edits[n];
+
+  const title = document.createElement("h3");
+  title.innerHTML = `B${n}${edit.secondary ? '<span class="sec-tag">has secondary</span>' : ""}`;
+  card.appendChild(title);
+
+  card.appendChild(actionForm(n, "primary"));
+
+  const divider = document.createElement("div");
+  divider.className = "divider";
+  card.appendChild(divider);
+
+  const h4 = document.createElement("h4");
+  h4.textContent = "Secondary (hold)";
+  card.appendChild(h4);
+
+  if (edit.secondary === null) {
+    const add = document.createElement("button");
+    add.className = "btn";
+    add.textContent = "Add secondary action";
+    add.onclick = () => mirrored(n, t => {
+      if (edits[t].secondary === null) {
+        edits[t].secondary = {
+          enabled: true,
+          hold_seconds: config.buttons.secondary_hold_default_seconds,
+          action: newAction("effect_cc", true),
+        };
+      }
+      saveSecondary(t);
+      rebuildCard(t);
+    });
+    card.appendChild(add);
+  } else {
+    const hold = document.createElement("input");
+    hold.type = "number"; hold.min = 0.2; hold.max = 10; hold.step = 0.1;
+    hold.value = edit.secondary.hold_seconds;
+    hold.onchange = () => {
+      const v = parseFloat(hold.value);
+      if (isNaN(v)) return;
+      mirrored(n, t => {
+        if (edits[t].secondary) { edits[t].secondary.hold_seconds = v; saveSecondary(t); }
+      });
+    };
+    card.appendChild(field("Hold duration (seconds)", hold));
+    card.appendChild(actionForm(n, "secondary"));
+    const remove = document.createElement("button");
+    remove.className = "btn danger";
+    remove.textContent = "Remove secondary action";
+    remove.onclick = () => mirrored(n, t => {
+      if (edits[t].secondary !== null) {
+        edits[t].secondary = null;
+        removeSecondary(t);
+        rebuildCard(t);
+      }
+    });
+    card.appendChild(remove);
+  }
+  return card;
+}
 
 function field(labelText, input) {
   const div = document.createElement("div");
@@ -310,33 +396,76 @@ function field(labelText, input) {
   return div;
 }
 
-function actionForm(action, allowedTypes, onTypeChange) {
+function newAction(type, isSecondary) {
+  const a = structuredClone(TEMPLATES[type]);
+  if (type === "program_change") a.program_number = config.midi.program_display_base;
+  if (isSecondary) { delete a.off_color; delete a.image_asset_id; }
+  return a;
+}
+
+function getAction(n, role) {
+  return role === "primary" ? edits[n].primary
+       : edits[n].secondary && edits[n].secondary.action;
+}
+
+// Run fn for this button and every other selected one (multi-edit).
+function mirrored(n, fn) {
+  const targets = selected.has(n) && selected.size > 1 ? [...selected] : [n];
+  for (const t of targets) fn(t);
+}
+
+function setField(n, role, key, value, structural) {
+  mirrored(n, t => {
+    const action = getAction(t, role);
+    if (!action) return;
+    // Labels are per-button even in multi-edit; skip mirroring them.
+    if (key === "label" && t !== n) return;
+    if (key === "type") {
+      if (action.type === value) return;
+      const fresh = newAction(value, role === "secondary");
+      fresh.label = action.label || "";
+      if (action.midi_channel && value !== "nothing") fresh.midi_channel = action.midi_channel;
+      if (role === "primary") edits[t].primary = fresh;
+      else edits[t].secondary.action = fresh;
+    } else {
+      action[key] = value;
+    }
+    role === "primary" ? savePrimary(t) : saveSecondary(t);
+    if (structural) rebuildCard(t);
+  });
+}
+
+function actionForm(n, role) {
+  const action = getAction(n, role);
   const wrap = document.createElement("div");
+  const types = role === "primary" ? PRIMARY_TYPES : SECONDARY_TYPES;
 
   const typeSel = document.createElement("select");
-  for (const t of allowedTypes) {
+  for (const t of types) {
     const opt = document.createElement("option");
     opt.value = t; opt.textContent = TYPE_NAMES[t];
     typeSel.appendChild(opt);
   }
   typeSel.value = action.type;
-  typeSel.onchange = () => onTypeChange(typeSel.value);
+  typeSel.onchange = () => setField(n, role, "type", typeSel.value, true);
   wrap.appendChild(field("Action type", typeSel));
 
   const label = document.createElement("input");
   label.type = "text"; label.maxLength = 24; label.value = action.label || "";
-  label.oninput = () => { action.label = label.value; };
+  label.onchange = () => setField(n, role, "label", label.value);
   wrap.appendChild(field("Label", label));
 
   const pairs = document.createElement("div");
   pairs.className = "row2";
   for (const [key, name, kind] of FIELDS[action.type]) {
+    if (role === "secondary" && key === "off_color") continue;
     if (kind === "bool") {
       const div = document.createElement("div");
       div.className = "check";
       const cb = document.createElement("input");
-      cb.type = "checkbox"; cb.checked = !!action[key]; cb.id = "cb-" + key;
-      cb.onchange = () => { action[key] = cb.checked; };
+      cb.type = "checkbox"; cb.checked = !!action[key];
+      cb.id = `cb-${n}-${role}-${key}`;
+      cb.onchange = () => setField(n, role, key, cb.checked);
       const lb = document.createElement("label");
       lb.htmlFor = cb.id; lb.textContent = name;
       div.append(cb, lb);
@@ -346,14 +475,17 @@ function actionForm(action, allowedTypes, onTypeChange) {
     const input = document.createElement("input");
     if (kind === "color") {
       input.type = "color"; input.value = action[key];
-      input.oninput = () => { action[key] = input.value.toUpperCase(); };
+      input.onchange = () => setField(n, role, key, input.value.toUpperCase());
     } else {
       const base = config.midi.program_display_base;
       input.type = "number";
       input.min = kind === "chan" ? 1 : kind === "pc" ? base : 0;
       input.max = kind === "chan" ? 16 : kind === "pc" ? 127 + base : 127;
       input.value = action[key];
-      input.oninput = () => { action[key] = parseInt(input.value, 10); };
+      input.onchange = () => {
+        const v = parseInt(input.value, 10);
+        if (!isNaN(v)) setField(n, role, key, v);
+      };
     }
     pairs.appendChild(field(name, input));
   }
@@ -361,94 +493,52 @@ function actionForm(action, allowedTypes, onTypeChange) {
   return wrap;
 }
 
-function switchType(action, newType, allowImage) {
-  const fresh = structuredClone(TEMPLATES[newType]);
-  fresh.label = action.label || "";
-  fresh.midi_channel = action.midi_channel || fresh.midi_channel;
-  if (!allowImage) delete fresh.image_asset_id;
-  return fresh;
+/* ---------- saving ---------- */
+
+function applySavedSlot(n, slot) {
+  menuById(currentMenu).slots = menuById(currentMenu).slots || {};
+  menuById(currentMenu).slots[String(n)] = slot;
+  refreshCell(n);
 }
 
-function renderModal() {
-  const tabs = $("modal-tabs");
-  tabs.innerHTML = "";
-  for (const t of ["primary", "secondary"]) {
-    const b = document.createElement("button");
-    b.textContent = t === "primary" ? "Primary" : "Secondary";
-    b.className = edit.tab === t ? "active" : "";
-    b.onclick = () => { edit.tab = t; renderModal(); };
-    tabs.appendChild(b);
-  }
-
-  const form = $("modal-form");
-  form.innerHTML = "";
-  const foot = $("modal-foot");
-  foot.innerHTML = "";
-
-  if (edit.tab === "primary") {
-    form.appendChild(actionForm(edit.primary, PRIMARY_TYPES, t => {
-      edit.primary = switchType(edit.primary, t, true);
-      renderModal();
-    }));
-  } else if (edit.secondary === null) {
-    const add = document.createElement("button");
-    add.className = "btn";
-    add.textContent = "Add secondary action";
-    add.onclick = () => {
-      edit.secondary = {
-        enabled: true,
-        hold_seconds: config.buttons.secondary_hold_default_seconds,
-        action: switchType({}, "effect_cc", false),
-      };
-      renderModal();
-    };
-    form.appendChild(add);
-  } else {
-    const hold = document.createElement("input");
-    hold.type = "number"; hold.min = 0.2; hold.max = 10; hold.step = 0.1;
-    hold.value = edit.secondary.hold_seconds;
-    hold.oninput = () => { edit.secondary.hold_seconds = parseFloat(hold.value); };
-    form.appendChild(field("Hold duration (seconds)", hold));
-    form.appendChild(actionForm(edit.secondary.action, SECONDARY_TYPES, t => {
-      edit.secondary.action = switchType(edit.secondary.action, t, false);
-      renderModal();
-    }));
-    const remove = document.createElement("button");
-    remove.className = "btn danger";
-    remove.textContent = "Remove secondary action";
-    remove.onclick = () => { edit.secondary = null; renderModal(); };
-    foot.appendChild(remove);
-  }
-
-  const cancel = document.createElement("button");
-  cancel.className = "btn"; cancel.textContent = "Cancel"; cancel.onclick = closeEditor;
-  const save = document.createElement("button");
-  save.className = "btn primary"; save.textContent = "Save"; save.onclick = saveEditor;
-  foot.append(cancel, save);
+function refreshCell(n) {
+  const cell = $("cell-" + n);
+  if (!cell) return;
+  const slot = slotOf(currentMenu, n);
+  const a = slot && slot.primary;
+  const sec = slot && slot.secondary && slot.secondary.enabled ? slot.secondary : null;
+  cell.querySelector(".swatch").style.background = actionColor(a);
+  cell.querySelector(".label").textContent = (a && a.label) || (a ? "" : "—");
+  cell.querySelector(".meta").textContent = actionMeta(a);
+  cell.querySelector(".hold").textContent =
+    sec ? `Hold ${sec.hold_seconds}s for ${sec.action.label || TYPE_NAMES[sec.action.type]}` : "";
 }
 
-async function saveEditor() {
-  const { menuId, n } = edit;
+async function post(n, path, payload) {
   setStatus("saving…");
   try {
-    let data = await api("/api/slot/primary",
-      { menu_id: menuId, button_num: n, action: edit.primary });
-    if (edit.secondary !== null) {
-      data = await api("/api/slot/secondary", {
-        menu_id: menuId, button_num: n,
-        hold_seconds: edit.secondary.hold_seconds, action: edit.secondary.action,
-      });
-    } else if (edit.hadSecondary) {
-      data = await api("/api/slot/secondary/remove", { menu_id: menuId, button_num: n });
-    }
-    menuById(menuId).slots = menuById(menuId).slots || {};
-    menuById(menuId).slots[String(n)] = data.slot;
+    const data = await api(path, payload);
+    applySavedSlot(n, data.slot);
     setStatus("saved", "ok");
-    closeEditor();
-    render();
   } catch (err) {
-    setStatus("save failed: " + err.message, "err");
+    setStatus(`B${n} save failed: ` + err.message, "err");
   }
+}
+
+function savePrimary(n) {
+  post(n, "/api/slot/primary",
+    { menu_id: currentMenu, button_num: n, action: edits[n].primary });
+}
+function saveSecondary(n) {
+  const sec = edits[n].secondary;
+  if (!sec) return;
+  post(n, "/api/slot/secondary", {
+    menu_id: currentMenu, button_num: n,
+    hold_seconds: sec.hold_seconds, action: sec.action,
+  });
+}
+function removeSecondary(n) {
+  post(n, "/api/slot/secondary/remove", { menu_id: currentMenu, button_num: n });
 }
 
 /* ---------- sidebar settings ---------- */
@@ -471,7 +561,6 @@ function initSettings() {
   $("set-pcbase").onchange = async () => {
     await saveSettings({ program_display_base: parseInt($("set-pcbase").value, 10) });
     config = await api("/api/config");
-    TEMPLATES.program_change.program_number = config.midi.program_display_base;
     render();
   };
 }
@@ -523,7 +612,6 @@ async function pollStatus() {
 async function load() {
   try {
     config = await api("/api/config");
-    TEMPLATES.program_change.program_number = config.midi.program_display_base;
     render();
     initSettings();
     pollStatus();

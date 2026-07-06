@@ -35,7 +35,8 @@ def effect_action(**overrides) -> dict:
 def expression_action(**overrides) -> dict:
     action = {
         "type": "expression_pedal", "midi_channel": 2, "cc_number": 11,
-        "color": "#CC66FF", "value_min": 10, "value_max": 120,
+        "off_color": "#303030", "on_color": "#CC66FF",
+        "value_min": 10, "value_max": 120,
         "reverse": True, "has_home": True, "home_value": 5,
         "label": "WAH", "image_asset_id": None,
     }
@@ -46,22 +47,34 @@ def expression_action(**overrides) -> dict:
 class ValidateActionTests(unittest.TestCase):
     def test_normalizes_effect_cc(self):
         action = validate_action(
-            effect_action(label="  FUZZ  ", extra_junk=True), ("effect_cc",), allow_image=True
+            effect_action(label="  FUZZ  ", extra_junk=True), ("effect_cc",), secondary=False
         )
         self.assertEqual(action["label"], "FUZZ")
         self.assertEqual(action["on_color"], "#00FF66")  # uppercased
         self.assertNotIn("extra_junk", action)
         self.assertIn("image_asset_id", action)
+        self.assertIn("off_color", action)
 
     def test_expression_fields_round_trip(self):
-        action = validate_action(expression_action(), ("expression_pedal",), allow_image=True)
+        action = validate_action(expression_action(), ("expression_pedal",), secondary=False)
         self.assertEqual(action["value_min"], 10)
         self.assertTrue(action["reverse"])
         self.assertEqual(action["home_value"], 5)
 
-    def test_secondary_drops_image(self):
-        action = validate_action(effect_action(), ("effect_cc",), allow_image=False)
+    def test_secondary_drops_image_and_off_color(self):
+        action = validate_action(effect_action(), ("effect_cc",), secondary=True)
         self.assertNotIn("image_asset_id", action)
+        self.assertNotIn("off_color", action)
+        self.assertEqual(action["on_color"], "#00FF66")
+
+    def test_secondary_needs_no_off_color(self):
+        raw = effect_action()
+        del raw["off_color"]
+        action = validate_action(raw, ("effect_cc",), secondary=True)
+        self.assertEqual(action["type"], "effect_cc")
+        # But a primary does need one.
+        with self.assertRaises(ValueError):
+            validate_action(raw, ("effect_cc",), secondary=False)
 
     def test_rejects_bad_fields(self):
         bad = [
@@ -75,28 +88,27 @@ class ValidateActionTests(unittest.TestCase):
         ]
         for raw in bad:
             with self.assertRaises(ValueError, msg=repr(raw)):
-                allowed = ("effect_cc",) if isinstance(raw, dict) else ("effect_cc",)
-                validate_action(raw, allowed, allow_image=True)
+                validate_action(raw, ("effect_cc",), secondary=False)
 
 
 class ProgramDisplayBaseTests(unittest.TestCase):
     def pc_action(self, number):
         return {
             "type": "program_change", "midi_channel": 1, "program_number": number,
-            "inactive_color": "#303030", "active_color": "#3399FF",
+            "off_color": "#303030", "on_color": "#3399FF",
             "label": "PATCH", "image_asset_id": None,
         }
 
     def test_base1_rejects_zero_and_allows_128(self):
         with self.assertRaises(ValueError):
-            validate_action(self.pc_action(0), ("program_change",), True, pc_base=1)
-        action = validate_action(self.pc_action(128), ("program_change",), True, pc_base=1)
+            validate_action(self.pc_action(0), ("program_change",), False, pc_base=1)
+        action = validate_action(self.pc_action(128), ("program_change",), False, pc_base=1)
         self.assertEqual(action["program_number"], 128)
 
     def test_base0_rejects_128_and_allows_zero(self):
         with self.assertRaises(ValueError):
-            validate_action(self.pc_action(128), ("program_change",), True, pc_base=0)
-        action = validate_action(self.pc_action(0), ("program_change",), True, pc_base=0)
+            validate_action(self.pc_action(128), ("program_change",), False, pc_base=0)
+        action = validate_action(self.pc_action(0), ("program_change",), False, pc_base=0)
         self.assertEqual(action["program_number"], 0)
 
     def test_set_primary_uses_config_base(self):
@@ -161,10 +173,18 @@ class SlotEditTests(unittest.TestCase):
         slot = remove_secondary(state, 1, 2)
         self.assertNotIn("secondary", slot)
 
-    def test_secondary_rejects_expression_type(self):
+    def test_secondary_accepts_expression_type(self):
+        state = make_state()
+        slot = set_secondary(state, 1, 2, 1.5, expression_action())
+        action = slot["secondary"]["action"]
+        self.assertEqual(action["type"], "expression_pedal")
+        self.assertNotIn("off_color", action)
+        self.assertNotIn("image_asset_id", action)
+
+    def test_secondary_rejects_nothing_type(self):
         state = make_state()
         with self.assertRaises(ValueError):
-            set_secondary(state, 1, 2, 1.5, expression_action())
+            set_secondary(state, 1, 2, 1.5, {"type": "nothing", "label": ""})
 
     def test_remove_secondary_clears_its_expression_mode(self):
         state = make_state()

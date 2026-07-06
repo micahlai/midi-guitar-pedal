@@ -35,7 +35,56 @@ def load_config() -> dict:
             f"(expected {CONFIG_VERSION}); migrations not implemented yet"
         )
     _fill_missing(config, default_config())
+    if _normalize_colors(config):
+        log.info("migrated action colors to off_color/on_color model")
+        save_config(config)
     return config
+
+
+# Pre-2026-07-06 configs used per-type color field names; the current model
+# is off_color + on_color on every primary (secondaries: on_color only).
+_OLD_ON_KEYS = ("pressed_color", "active_color", "color")
+_OLD_OFF_KEYS = ("default_color", "inactive_color")
+
+
+def _normalize_colors(config: dict) -> bool:
+    changed = False
+    for menu in config.get("menus", []):
+        for slot in menu.get("slots", {}).values():
+            primary = slot.get("primary")
+            if primary:
+                changed |= _normalize_action(primary, secondary=False)
+            secondary = slot.get("secondary", {}).get("action") if slot.get("secondary") else None
+            if secondary:
+                changed |= _normalize_action(secondary, secondary=True)
+    return changed
+
+
+def _normalize_action(action: dict, secondary: bool) -> bool:
+    if action.get("type") in (None, "nothing"):
+        return False
+    changed = False
+    if "on_color" not in action:
+        for key in _OLD_ON_KEYS:
+            if key in action:
+                action["on_color"] = action[key]
+                break
+        else:
+            action["on_color"] = "#00FF66"
+        changed = True
+    if not secondary and "off_color" not in action:
+        for key in _OLD_OFF_KEYS:
+            if key in action:
+                action["off_color"] = action[key]
+                break
+        else:
+            action["off_color"] = "#303030"
+        changed = True
+    for key in _OLD_ON_KEYS + _OLD_OFF_KEYS + (("off_color",) if secondary else ()):
+        if key in action:
+            del action[key]
+            changed = True
+    return changed
 
 
 def _fill_missing(config: dict, defaults: dict) -> None:

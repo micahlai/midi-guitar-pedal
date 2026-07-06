@@ -144,6 +144,12 @@ Goals:
 Deliverables:
 - Web app fully configures all core behavior.
 
+## Milestone 12.5 - Web App Editor Additions
+
+- JSON save and load (with preset names)
+- Undo/redo (restarting the device will reset the memory)
+- Color palette (when picking a color, it'll first show the color palette (with 10 slots). these colors are linked to each other. When changing it in the color palette editor, it will change all of the colors with that slot). Users can also have the option to just pick another color (that isn't part of the color palette and be unlinked)
+
 ## Milestone 13 — Image Upload
 
 Goals:

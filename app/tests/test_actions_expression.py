@@ -49,6 +49,13 @@ class ActionLogicTest(unittest.TestCase):
         self.logic.on_button_event(5, "press", 0.0)  # LEAD, program 2
         self.assertEqual(self.midi.sent, [("pc", 1, 2)])
 
+    def test_secondary_hold_tracks_secondary_pressed(self):
+        self.logic.on_button_event(1, "press", 0.0)  # DRIVE, secondary SOLO
+        self.logic.tick(2.0)  # past the 1.5 s hold -> secondary fires
+        self.assertIn(1, self.state.secondary_pressed)
+        self.logic.on_button_event(1, "release", 2.1)
+        self.assertNotIn(1, self.state.secondary_pressed)
+
     def test_expression_button_sets_mode_no_midi(self):
         self.logic.on_button_event(6, "press", 0.0)  # VOLUME
         self.assertEqual(self.state.expression_mode, (1, 6, "primary"))

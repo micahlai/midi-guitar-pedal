@@ -44,6 +44,7 @@ class ActionLogic:
             self._on_press(num, t)
         elif kind == "release":
             self.state.pressed_buttons.discard(num)
+            self.state.secondary_pressed.discard(num)
             self._on_release(num)
 
     def tick(self, t: float) -> None:
@@ -55,6 +56,7 @@ class ActionLogic:
                 del self._pending[num]
                 secondary = get_secondary_action(pending["slot"])
                 log.info("B%d hold: secondary fires", num)
+                self.state.secondary_pressed.add(num)
                 self._fire(pending["menu"], num, secondary, role="secondary")
 
     def _on_press(self, num: int, t: float) -> None:

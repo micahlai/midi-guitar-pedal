@@ -24,6 +24,9 @@ class StateManager:
         self.expression_mode: tuple[int, int, str] | None = None
         self.shift_held = False
         self.pressed_buttons: set[int] = set()  # physical buttons currently down
+        # Buttons whose SECONDARY action fired and are still held — drives the
+        # secondary on_color for action_cc secondaries.
+        self.secondary_pressed: set[int] = set()
         self.settings_open = False
         self.settings_index = 0
 

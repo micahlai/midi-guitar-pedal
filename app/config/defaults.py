@@ -55,6 +55,9 @@ DEFAULT_CONFIG = {
             "name": "Menu 1",
             # Demo assignments exercising every action type; all editable via
             # config.json (and the web app in later milestones).
+            # Color model: every primary action has off_color + on_color;
+            # secondary actions have on_color only (see ui/renderer.py
+            # _slot_status_color for the display rules).
             "slots": {
                 "1": {
                     "primary": {
@@ -67,8 +70,7 @@ DEFAULT_CONFIG = {
                         "hold_seconds": 1.5,
                         "action": {
                             "type": "program_change", "midi_channel": 1,
-                            "program_number": 3,
-                            "inactive_color": "#303030", "active_color": "#3399FF",
+                            "program_number": 3, "on_color": "#3399FF",
                             "label": "SOLO",
                         },
                     },
@@ -80,28 +82,30 @@ DEFAULT_CONFIG = {
                 }},
                 "3": {"primary": {
                     "type": "action_cc", "midi_channel": 1, "cc_number": 23,
-                    "default_color": "#303030", "pressed_color": "#FF6600",
+                    "off_color": "#303030", "on_color": "#FF6600",
                     "label": "TAP", "image_asset_id": None,
                 }},
                 "4": {"primary": {
                     "type": "program_change", "midi_channel": 1, "program_number": 1,
-                    "inactive_color": "#303030", "active_color": "#3399FF",
+                    "off_color": "#303030", "on_color": "#3399FF",
                     "label": "RHYTHM", "image_asset_id": None,
                 }},
                 "5": {"primary": {
                     "type": "program_change", "midi_channel": 1, "program_number": 2,
-                    "inactive_color": "#303030", "active_color": "#3399FF",
+                    "off_color": "#303030", "on_color": "#3399FF",
                     "label": "LEAD", "image_asset_id": None,
                 }},
                 "6": {"primary": {
                     "type": "expression_pedal", "midi_channel": 1, "cc_number": 7,
-                    "color": "#FFCC00", "label": "VOLUME", "image_asset_id": None,
+                    "off_color": "#303030", "on_color": "#FFCC00",
+                    "label": "VOLUME", "image_asset_id": None,
                     "value_min": 0, "value_max": 127, "reverse": False,
                     "has_home": False, "home_value": 0,
                 }},
                 "7": {"primary": {
                     "type": "expression_pedal", "midi_channel": 1, "cc_number": 11,
-                    "color": "#CC66FF", "label": "WAH", "image_asset_id": None,
+                    "off_color": "#303030", "on_color": "#CC66FF",
+                    "label": "WAH", "image_asset_id": None,
                     "value_min": 0, "value_max": 127, "reverse": False,
                     "has_home": True, "home_value": 0,
                 }},

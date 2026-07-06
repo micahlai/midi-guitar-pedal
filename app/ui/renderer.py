@@ -12,6 +12,7 @@ Debug: SIGUSR1 makes the render thread save the next frame to
 import logging
 import os
 import threading
+import time
 
 from config.model import get_primary, get_secondary_action, get_slot
 from hardware.constants import DISPLAY_HEIGHT, DISPLAY_WIDTH
@@ -26,6 +27,7 @@ GRID_COLS = 5
 GRID_ROWS = 2
 PANEL_MARGIN = 8
 STATUS_BAR_HEIGHT = 22
+FLICKER_PERIOD_S = 2.0  # primary+secondary both active -> alternate on_colors
 SCREENSHOT_PATH = "/tmp/controller-frame.png"
 
 
@@ -185,30 +187,50 @@ class UiRenderer:
             rect.width - 24,
             STATUS_BAR_HEIGHT,
         )
-        pygame.draw.rect(surface, pygame.Color(self._status_color(primary, button_num)), status, border_radius=6)
+        pygame.draw.rect(
+            surface, pygame.Color(self._slot_status_color(slot, button_num)),
+            status, border_radius=6,
+        )
 
-    def _status_color(self, primary: dict | None, button_num: int) -> str:
-        """Status bar color per docs/03_UI_SPEC.md."""
-        theme = self.theme
+    def _slot_status_color(self, slot: dict | None, button_num: int) -> str:
+        """Status bar color for the whole slot (docs/03_UI_SPEC.md).
+
+        Primary actions carry off_color + on_color; secondaries carry
+        on_color only. Secondary active -> its on_color; primary active ->
+        its on_color; BOTH active -> flicker between the two on_colors with
+        a 2 s period; neither -> the primary's off_color.
+        """
+        primary = slot.get("primary") if slot else None
         if primary is None:
-            return theme["disabled"]
+            return self.theme["disabled"]
+        secondary = get_secondary_action(slot)
+        p_active = self._action_active(primary, button_num, "primary")
+        s_active = secondary is not None and self._action_active(secondary, button_num, "secondary")
+        if p_active and s_active:
+            first_half = time.monotonic() % FLICKER_PERIOD_S < FLICKER_PERIOD_S / 2
+            return primary["on_color"] if first_half else secondary["on_color"]
+        if s_active:
+            return secondary["on_color"]
+        if p_active:
+            return primary["on_color"]
+        return primary.get("off_color") or primary.get("color") or self.theme["disabled"]
+
+    def _action_active(self, action: dict, button_num: int, role: str) -> bool:
         state = self.state
-        kind = primary.get("type")
+        kind = action.get("type")
         if kind == "effect_cc":
-            key = (primary["midi_channel"], primary["cc_number"])
-            return primary["on_color"] if state.effect_states.get(key) else primary["off_color"]
+            return bool(state.effect_states.get((action["midi_channel"], action["cc_number"])))
         if kind == "action_cc":
-            pressed = button_num in state.pressed_buttons
-            return primary["pressed_color"] if pressed else primary["default_color"]
+            if role == "secondary":
+                return button_num in state.secondary_pressed
+            return (button_num in state.pressed_buttons
+                    and button_num not in state.secondary_pressed)
         if kind == "program_change":
             base = state.config["midi"]["program_display_base"]
-            active = state.current_program == primary["program_number"] - base
-            return primary["active_color"] if active else primary["inactive_color"]
+            return state.current_program == action["program_number"] - base
         if kind == "expression_pedal":
-            active = (state.expression_mode is not None
-                      and state.expression_mode[:2] == (state.current_menu, button_num))
-            return primary["color"] if active else theme["disabled"]
-        return primary.get("color") or theme["disabled"]  # nothing
+            return state.expression_mode == (state.current_menu, button_num, role)
+        return False  # nothing
 
     def _draw_expression(self, pygame, surface, font_small, grid_width, exp_width) -> None:
         theme = self.theme
@@ -222,7 +244,7 @@ class UiRenderer:
         pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), exp_rect, border_radius=12)
 
         label_text = action.get("label", "EXP") if action else "EXP"
-        bar_color = action.get("color", "#3399FF") if action else theme["disabled"]
+        bar_color = action.get("on_color", "#3399FF") if action else theme["disabled"]
         label = font_small.render(label_text, True, pygame.Color(theme["text"]))
         surface.blit(label, label.get_rect(centerx=exp_rect.centerx, top=exp_rect.top + 16))
 

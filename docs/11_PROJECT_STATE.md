@@ -259,6 +259,33 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   (1,2,3,4 -> 0,1,2,3 -> 1,2,3,4); PC 0 rejected at base 1 ("must be an
   integer 1-128"). 73 unit tests passing.
 
+### Post-M12 — inline editor + unified color model (2026-07-06, user-directed)
+- Web editor: modal removed; all 9 buttons' full settings render as cards
+  below the panel grid. Plain click on a panel cell scrolls to its card;
+  SHIFT-CLICK selects multiple — any field change on a selected button
+  mirrors to all selected (labels intentionally excluded) and each mirrored
+  slot auto-saves. Everything saves on change (no Save button).
+- Color model: every primary action now has off_color + on_color (all
+  types; nothing keeps its single color); secondary actions have on_color
+  ONLY. Old per-type fields (default/pressed, inactive/active, expression
+  color) are migrated by the loader on first run (`_normalize_colors`,
+  logged + saved back) — verified against the user's live Pi config.
+- Status bar display rules (renderer `_slot_status_color`): secondary
+  active -> secondary on_color; primary active -> primary on_color; BOTH
+  active -> flicker between the two on_colors with a 2 s period; neither ->
+  primary off_color. "Active" per type: effect_cc = feedback state,
+  program_change = current program (base-aware), expression = active pot
+  mode (role-aware), action_cc = held (primary) / held-after-secondary-
+  fired (secondary, via new state.secondary_pressed set maintained by
+  ActionLogic).
+- expression_pedal is now allowed as a SECONDARY type (web + validation);
+  M10 logic already supported (menu, button, "secondary") pot modes.
+- 87 unit tests passing (new: status color rules incl. flicker with mocked
+  clock, color migration, secondary_pressed tracking).
+- NOTE: flicker verified by unit test only — needs two simultaneously
+  active assignments on one slot (e.g. effect feedback + matching PC) to
+  see live; physical buttons still unwired.
+
 ## Current Milestone
 
 Milestone 13 — Image Upload
