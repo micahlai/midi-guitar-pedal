@@ -202,6 +202,7 @@ Goals:
 - Better state persistence.
 - Display current patch on top of display as well as tempo and battery/charging status in top right
 - Handle reconnects.
+- Smoother frame rate for holding button on display ui
 - Error screens.
 - Logging.
 - Crash recovery.

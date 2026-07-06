@@ -427,6 +427,27 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
 - NOT yet verified in a browser — the Pi was powered off when this landed;
   JS syntax node-checked only. Deploy + click through on next power-up.
 
+### Post-M14 — BLE advertising troubleshooting (2026-07-06)
+- User report: pedal not visible in the Mac's Bluetooth settings. Root
+  causes found with a CoreBluetooth scanner run from the Mac (works from a
+  shell once Terminal has the Bluetooth permission):
+  1. At boot the btmgmt fallback raced adapter power-up. Fix: the fallback
+     now runs on a worker thread that waits for `bluetoothctl show`
+     "Powered: yes" (up to 20 s) before rm-adv/add-adv.
+  2. The old "ActiveInstances" success check was a FALSE NEGATIVE:
+     bluetoothd never counts instances added via btmgmt (stays 0x00 even
+     while the radio transmits — btmon shows LE Set Advertise Enable
+     Success). Check removed; verify over the air instead.
+  3. The advertisement had NO NAME (btmgmt's `-n` flag emits no scan
+     response at all), so macOS had nothing to list it by. Fix: explicit
+     `-s` scan-response bytes built from device.name (AD type 0x09 complete
+     name, 0x08 shortened if truncated to the 31-byte budget).
+- Verified from the Mac after a clean service restart: advertisement carries
+  LocalName "Pi MIDI Foot Controller" + the MIDI service UUID.
+- REMINDER for connecting: BLE MIDI peripherals do NOT appear in macOS
+  System Settings -> Bluetooth. Use Audio MIDI Setup -> Window -> Show MIDI
+  Studio -> Bluetooth button -> Connect.
+
 ## Current Milestone
 
 Milestone 15 — Settings Menu (next up)

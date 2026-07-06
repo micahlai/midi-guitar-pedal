@@ -217,22 +217,47 @@ class BleMidiServer:
         advertising MGMT commands, which kernel 6.18 rejects (Invalid
         Parameters) on the Zero 2 W's legacy-only radio. The legacy
         `btmgmt add-adv` path works, so fall back to it: a connectable,
-        general-discoverable instance carrying the MIDI service UUID.
-        Connections still land on the bluetoothd-served GATT app."""
-        log.warning("D-Bus advertising failed (%s); trying btmgmt fallback", error)
-        self._btmgmt("add-adv", "-c", "-g", "-u", MIDI_SERVICE_UUID, "1")
-        # btmgmt produces no output and never exits cleanly when piped, so
-        # confirm through the adapter's ActiveInstances count instead.
-        if self._advertising_active():
-            self._legacy_instance = 1
-            log.info("BLE MIDI advertising via btmgmt (legacy) as %r", self.device_name)
+        general-discoverable instance carrying the MIDI service UUID and the
+        adapter name in the scan response (-n; without it macOS lists the
+        pedal namelessly or not at all). Connections still land on the
+        bluetoothd-served GATT app.
+
+        Runs on a worker thread: it sleeps waiting for adapter power-up
+        (at boot the instance would otherwise be installed before the radio
+        is on and never start transmitting), and must not block GLib."""
+        log.warning("D-Bus advertising failed (%s); using btmgmt fallback", error)
+        threading.Thread(target=self._legacy_advertise, name="ble-adv", daemon=True).start()
+
+    def _legacy_advertise(self) -> None:
+        for _ in range(10):
+            if self._adapter_powered():
+                break
+            time.sleep(2)
         else:
-            log.error("btmgmt advertising fallback failed (no active instances)")
+            log.error("adapter never powered on; BLE advertising not started")
+            return
+        self._btmgmt("rm-adv", "1")
+        self._btmgmt("add-adv", "-c", "-g", "-s", self._scan_rsp_hex(),
+                     "-u", MIDI_SERVICE_UUID, "1")
+        self._legacy_instance = 1
+        # NOTE: bluetoothd's ActiveInstances does NOT track instances added
+        # via btmgmt (always shows 0) — verify over the air with a BLE scan.
+        log.info("BLE MIDI advertising via btmgmt (legacy) as %r", self.device_name)
+
+    def _scan_rsp_hex(self) -> str:
+        """Scan response AD structure carrying the device name — btmgmt's -n
+        flag doesn't actually emit one, so build it by hand. Type 0x09 =
+        Complete Local Name, 0x08 = Shortened (when truncated to the 31-byte
+        scan response budget)."""
+        name = self.device_name.encode()[:29]
+        ad_type = 0x09 if name == self.device_name.encode() else 0x08
+        return bytes([len(name) + 1, ad_type, *name]).hex()
 
     @staticmethod
     def _btmgmt(*args) -> None:
-        """Fire a btmgmt command; effects are checked out-of-band because the
-        tool blocks forever on a pipe (hence the hard timeout)."""
+        """Fire a btmgmt command; it produces no output and never exits when
+        piped, so effects can only be checked out-of-band (hence the hard
+        timeout and no result parsing)."""
         try:
             subprocess.run(["sudo", "-n", "timeout", "5", "btmgmt", *args],
                            capture_output=True, stdin=subprocess.DEVNULL, timeout=15)
@@ -240,16 +265,13 @@ class BleMidiServer:
             log.error("btmgmt %s failed: %s", args[0], e)
 
     @staticmethod
-    def _advertising_active() -> bool:
+    def _adapter_powered() -> bool:
         try:
             show = subprocess.run(["bluetoothctl", "show"], capture_output=True,
                                   text=True, stdin=subprocess.DEVNULL, timeout=10)
         except (OSError, subprocess.TimeoutExpired):
             return False
-        for line in show.stdout.splitlines():
-            if "ActiveInstances" in line:
-                return "0x00" not in line
-        return False
+        return any("Powered: yes" in line for line in show.stdout.splitlines())
 
     def _find_adapter(self, dbus, bus):
         om = dbus.Interface(bus.get_object(BLUEZ, "/"), OM_IFACE)
