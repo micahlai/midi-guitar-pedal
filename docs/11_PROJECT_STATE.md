@@ -4,8 +4,8 @@ Claude should update this file after every meaningful implementation session.
 
 ## Current Status
 
-Milestone 1 complete (2026-07-05). Repository skeleton created, Pi provisioned,
-app runs at boot under systemd and logs a heartbeat to the journal.
+Milestone 2 complete (2026-07-05). 1920x480 display running fullscreen via
+pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
 
 ## Hardware Confirmed
 
@@ -33,9 +33,39 @@ app runs at boot under systemd and logs a heartbeat to the journal.
 - `deploy.sh` rsyncs `app/` + service unit to the Pi and restarts the service.
 - Default `config.json` auto-created at `/opt/midi-controller/config/config.json`.
 
+### Milestone 2 — Display Bring-Up (2026-07-05)
+- Panel EDID only advertises 720x480/640x480; forced the real mode with
+  `video=HDMI-A-1:1920x480M@60D` in `/boot/firmware/cmdline.txt` (CVT timings,
+  backup at `cmdline.txt.bak`). Panel accepted it; fb is 1920x480.
+- UI framework decided: pygame 2.6.1 on SDL2 KMSDRM (no X/Wayland). Installed
+  via apt `python3-pygame`; venv rebuilt with `--system-site-packages`.
+  Also required `libegl-mesa0 libegl1 libgles2` (Lite image lacks the EGL/GLES
+  runtime, symptom: "EGL not initialized").
+- `ui/renderer.py`: fullscreen 30 fps render thread; 5x2 panel grid with
+  placeholder labels B1-B9 + required bottom status rectangles; B10 panel shows
+  current menu (and a highlight border when Shift held); right expression strip
+  placeholder with vertical value bar; theme colors from config.
+- Debug facility: `kill -USR1 <pid>` saves the current frame to
+  `/tmp/controller-frame.png` — used over ssh to verify screen contents.
+- Verified by screenshot: grid + EXP strip render correctly at 1920x480.
+- **vc4 alpha scanout bug found and fixed**: SDL's plain 2D present leaves the
+  ARGB scanout plane's alpha at zero and vc4 composites it as transparent —
+  software looks healthy (screenshots fine, CRTC active) but the physical
+  screen is black. Diagnosed with modetest (kernel path OK) vs pygame fill
+  (black) vs GL clear with alpha=1 (visible). Fix: `ui/gles.py` presents the
+  canvas through GLES2 with a shader forcing alpha to 1.0.
+- Debug on any monitor: renderer picks the smallest advertised mode fitting
+  1920x480 on both axes and centers the unscaled canvas in it (e.g. band in
+  the middle of a 1080p desk monitor); falls back to a centered crop if the
+  display can't fit it.
+- ~90% of one core at constant 30 fps (canvas → RGBA → GL texture upload per
+  frame); dirty-flag/idle throttling deferred to Milestone 16 (polish).
+- Gotcha: monitors/PiP scalers can serve stale or bogus EDIDs; a swap while
+  the app runs needs a service restart (SDL doesn't re-modeset on hotplug).
+
 ## Current Milestone
 
-Milestone 2 — Display Bring-Up
+Milestone 3 — GPIO Buttons
 
 ## Decisions Made
 
@@ -64,7 +94,6 @@ Milestone 2 — Display Bring-Up
   `hardware/constants.py`; confirm against actual wiring).
 - Exact SPI ADC chip/model.
 - Exact MIDI library.
-- Exact UI framework (pygame vs SDL2 direct — decide in Milestone 2).
 - Exact BLE MIDI implementation path on Raspberry Pi OS Lite.
 - Exact screen mounting/brightness considerations.
 
@@ -72,13 +101,13 @@ Milestone 2 — Display Bring-Up
 
 - BLE MIDI setup may require system-level BlueZ work.
 - USB MIDI gadget configuration may require boot/config changes.
-- 1920x480 display configuration may need custom HDMI mode.
 - Raw LCD/driver board may have mounting/brightness quirks.
 - Power button safe shutdown needs hardware support for true power cut.
 - Pi Zero 2 W has ~424 MB RAM total; keep dependency footprint small.
 
 ## Next Actions
 
-1. Milestone 2: configure 1920x480 HDMI output (KMS/`/boot/firmware/config.txt`).
-2. Choose UI framework (pygame on KMSDRM likely) and install into venv.
-3. Fullscreen render loop: 5x2 button grid + expression strip placeholder.
+1. Milestone 3: gpiozero/lgpio button reading for all 10 buttons + debounce.
+2. Event model: press, release, hold.
+3. Shift/Menu behavior: toggle Menu 1/2, Shift+B5 → Menu 3, Shift hold → Menu 4.
+4. Confirm actual wiring matches draft GPIO numbers in `hardware/constants.py`.

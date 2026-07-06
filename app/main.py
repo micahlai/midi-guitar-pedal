@@ -54,6 +54,8 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
+    # Debug: `kill -USR1 <pid>` saves the current frame to /tmp/controller-frame.png.
+    signal.signal(signal.SIGUSR1, lambda s, f: ui.request_screenshot())
 
     while running:
         log.info("heartbeat: menu %d", state.current_menu)
