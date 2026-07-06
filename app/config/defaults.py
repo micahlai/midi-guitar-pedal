@@ -30,6 +30,10 @@ DEFAULT_CONFIG = {
         "power_double_press_ms": 400,
         "power_hold_seconds": 3.0,
     },
+    "web": {
+        "enabled": True,
+        "port": 8080,
+    },
     "midi": {
         "usb_enabled": True,
         "ble_enabled": True,

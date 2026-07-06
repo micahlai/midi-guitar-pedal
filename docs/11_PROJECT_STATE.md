@@ -183,9 +183,35 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
 - NOTE: every incoming message is logged at INFO; a busy DAW session makes
   the journal chatty — consider demoting "MIDI in" to DEBUG after bring-up.
 
+### Milestone 11 — Web App Basics (2026-07-05)
+- `web/server.py`: stdlib ThreadingHTTPServer (no new deps) on port 8080
+  (config `web.enabled`/`web.port`, back-filled by the loader), daemon thread,
+  started/stopped from main. Bind failure logs an error but doesn't kill the
+  controller.
+- Endpoints: `GET /` single-page editor, `GET /api/config` full config,
+  `POST /api/slot` `{menu_id, button_num, type, label}` -> validates, applies,
+  save_config()s, returns the updated slot.
+- Edit semantics: same-type edits only change the label (tuned CC numbers /
+  colors survive); a type change installs a fresh per-type template using
+  `midi.default_channel`. Slots are created on demand in empty menus.
+- Live-update safety: the edit is one dict-item assignment on the shared
+  config (atomic under the GIL; renderer/logic read config per frame). If the
+  edited slot's primary was the ACTIVE expression mode and is no longer
+  expression_pedal, `state.expression_mode` is cleared — otherwise
+  ExpressionLogic would KeyError on `value_min` and kill the main loop.
+- `web/static/index.html`: vanilla-JS dark-theme editor — 4 menu tabs, 5x2
+  grid (B10 shown as non-editable Shift), per-slot label input + type
+  dropdown, saves on change, color swatch + "Note/PC/CC n · ch n" summary.
+- VERIFIED END TO END from the Mac at `http://guitar-pedal.local:8080`:
+  edited B2 label and set B8 nothing->program_change via the API; screenshot
+  showed ECHO/CHORUS on the physical layout, config.json on the Pi persisted
+  both, service survived. Demo edits reverted after.
+- 60 unit tests passing (12 new: edit logic + HTTP round-trip on port 0 with
+  an injected save stub).
+
 ## Current Milestone
 
-Milestone 11 — Web App Basics
+Milestone 12 — Full Web App Editor
 
 ## Decisions Made
 
@@ -227,7 +253,9 @@ Milestone 11 — Web App Basics
 
 ## Next Actions
 
-1. Milestone 3: gpiozero/lgpio button reading for all 10 buttons + debounce.
-2. Event model: press, release, hold.
-3. Shift/Menu behavior: toggle Menu 1/2, Shift+B5 → Menu 3, Shift hold → Menu 4.
-4. Confirm actual wiring matches draft GPIO numbers in `hardware/constants.py`.
+1. Milestone 12: all per-type fields in the web editor (channels, CC/note
+   numbers, colors, program numbers, expression min/max/reverse/home).
+2. Secondary action tab system (add/remove, hold seconds).
+3. Expression settings sidebar + panel width + shift hold duration settings.
+4. Still pending from earlier: physical button wiring (Milestone 3) and pot
+   hardware (Milestone 5) bench verification.
