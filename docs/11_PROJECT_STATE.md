@@ -286,6 +286,18 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   active assignments on one slot (e.g. effect feedback + matching PC) to
   see live; physical buttons still unwired.
 
+### Post-M12 — web UI tab restructure (2026-07-06, user-directed)
+- Tabs are now: Overview | Menu 1-4 | Global Settings (sidebar removed;
+  hold/MIDI/expression settings + live status moved into the Global tab).
+- Overview tab: all 36 slots as compact panels grouped by menu, swatches in
+  fixed order primary-on · secondary-on · off; clicking a panel jumps to
+  that menu tab with the button's in-depth card selected + scrolled into
+  view.
+- Menu tabs: the in-depth cards ARE the layout now — 5x2 grid matching the
+  physical board (B10 dashed placeholder), scaling with window width
+  (page min-width 1000px). Clicking anywhere on a card that isn't an input
+  selects it; shift-click multi-selects; mirrored editing unchanged.
+
 ## Current Milestone
 
 Milestone 13 — Image Upload

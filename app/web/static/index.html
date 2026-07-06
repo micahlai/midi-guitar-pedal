@@ -13,6 +13,7 @@
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-width: 1000px;
   }
   header { display: flex; align-items: baseline; gap: 12px; padding: 16px 24px 0; }
   header h1 { font-size: 18px; margin: 0; font-weight: 600; }
@@ -27,76 +28,87 @@
     font-size: 14px; cursor: pointer;
   }
   nav button.active { background: var(--panel2); color: var(--text); font-weight: 600; }
-  .layout { display: flex; gap: 16px; margin: 0 24px 24px; align-items: flex-start; }
   main {
-    flex: 1; padding: 16px; background: var(--panel2);
+    margin: 0 24px 24px; padding: 16px; background: var(--panel2);
     border: 1px solid var(--border); border-radius: 0 8px 8px 8px;
   }
-  .hint { color: var(--dim); font-size: 12px; margin: 10px 2px 0; }
-  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .hint { color: var(--dim); font-size: 12px; margin: 0 2px 12px; }
+
+  /* ---- overview ---- */
+  .ov-menu { margin-bottom: 20px; }
+  .ov-menu h2 { font-size: 14px; margin: 0 0 8px; color: var(--dim); }
+  .ov-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
   .cell {
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px;
-    cursor: pointer; min-height: 96px; user-select: none;
+    padding: 9px 11px 11px; display: flex; flex-direction: column; gap: 3px;
+    cursor: pointer; min-height: 86px; user-select: none;
   }
-  .cell:hover { border-color: var(--dim); }
-  .cell.selected { border-color: var(--accent); }
+  .cell:hover { border-color: var(--accent); }
   .cell .head { display: flex; align-items: center; gap: 8px; }
   .cell .num { font-size: 12px; color: var(--dim); font-weight: 600; }
-  .cell .swatch {
+  .cell .swatches { display: flex; gap: 5px; margin-left: auto; }
+  .cell .sw {
     width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border);
-    margin-left: auto;
   }
-  .cell .label { font-size: 16px; font-weight: 600; min-height: 22px; }
+  .cell .label { font-size: 15px; font-weight: 600; min-height: 20px; }
   .cell .meta { font-size: 12px; color: var(--dim); }
   .cell .hold { font-size: 12px; color: var(--dim); font-style: italic; }
   .cell.shift {
     justify-content: center; align-items: center; color: var(--dim);
     border-style: dashed; cursor: default;
   }
-  .editors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+  .cell.shift:hover { border-color: var(--border); }
+
+  /* ---- menu editor cards, physical 5x2 layout ---- */
+  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
   .card {
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-    padding: 12px 14px 14px;
+    padding: 12px 12px 14px; cursor: pointer;
   }
-  .card.selected { border-color: var(--accent); }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card.shift {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--dim); border-style: dashed; cursor: default; min-height: 120px;
+  }
   .card h3 {
     margin: 0 0 10px; font-size: 13px; color: var(--dim); font-weight: 600;
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 8px; user-select: none;
   }
-  .card h3 .sec-tag { color: var(--accent); font-weight: 400; margin-left: auto; font-size: 12px; }
-  .card .divider {
-    border-top: 1px solid var(--border); margin: 12px -14px 12px;
+  .card h3 .sec-tag { color: var(--accent); font-weight: 400; margin-left: auto; font-size: 11px; }
+  .card .divider { border-top: 1px solid var(--border); margin: 12px -12px; }
+  .card h4 {
+    margin: 0 0 8px; font-size: 11px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: .05em; user-select: none;
   }
-  .card h4 { margin: 0 0 8px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
-  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
-  .field label { font-size: 12px; color: var(--dim); }
+  .field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+  .field label { font-size: 11px; color: var(--dim); }
   .field input[type=text], .field input[type=number], .field select {
     background: #0f0f0f; color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 6px 8px; font-size: 14px; width: 100%;
+    border-radius: 6px; padding: 5px 7px; font-size: 13px; width: 100%;
   }
-  .field input[type=color] { width: 100%; height: 30px; padding: 2px; background: #0f0f0f;
+  .field input[type=color] { width: 100%; height: 28px; padding: 2px; background: #0f0f0f;
     border: 1px solid var(--border); border-radius: 6px; }
   .field input:focus, .field select:focus { outline: 1px solid var(--accent); }
-  .check { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
-  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .check { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; font-size: 12px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
   .btn {
     background: var(--panel2); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer;
+    border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer;
   }
   .btn.danger { color: var(--err); border-color: var(--err); }
-  aside {
-    width: 300px; background: var(--panel2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 18px;
+
+  /* ---- global settings tab ---- */
+  .global { display: grid; grid-template-columns: repeat(3, minmax(240px, 340px)); gap: 24px; }
+  .global h2 {
+    font-size: 13px; margin: 0 0 12px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: .06em;
   }
-  aside h2 { font-size: 13px; margin: 0; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
-  aside .field select, aside .field input { width: 100%; }
-  #statusbox { font-size: 13px; color: var(--dim); display: flex; flex-direction: column; gap: 5px; }
+  .global .field label { font-size: 12px; }
+  .global .field input, .global .field select { font-size: 14px; padding: 7px 9px; }
+  #statusbox { font-size: 13px; color: var(--dim); display: flex; flex-direction: column; gap: 6px; }
   #statusbox b { color: var(--text); font-weight: 600; }
   .expbar { height: 8px; background: #0f0f0f; border-radius: 4px; overflow: hidden; }
   .expbar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
-  @media (max-width: 1250px) { .editors { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 1000px) { .layout { flex-direction: column; } aside { width: 100%; } }
 </style>
 </head>
 <body>
@@ -106,48 +118,49 @@
   <span id="status"></span>
 </header>
 <nav id="tabs"></nav>
-<div class="layout">
-  <main>
-    <div class="grid" id="grid"></div>
-    <div class="hint">Click a button to jump to its settings. Shift-click to select
-      several — a change to one selected button applies to all of them.</div>
-    <div class="editors" id="editors"></div>
-  </main>
-  <aside>
-    <div>
-      <h2>Hold Settings</h2>
-      <div class="field">
-        <label>Shift hold — Menu 4 (seconds)</label>
-        <input type="number" id="set-shift" min="0.5" max="10" step="0.1">
+<main>
+  <div id="view-overview" hidden></div>
+  <div id="view-menu" hidden>
+    <div class="hint">Click a panel to select it, shift-click to select several —
+      a change to one selected button applies to all of them (labels excluded).
+      All changes save immediately.</div>
+    <div class="cards" id="cards"></div>
+  </div>
+  <div id="view-global" hidden>
+    <div class="global">
+      <div>
+        <h2>Hold Settings</h2>
+        <div class="field">
+          <label>Shift hold — Menu 4 (seconds)</label>
+          <input type="number" id="set-shift" min="0.5" max="10" step="0.1">
+        </div>
+        <div class="field">
+          <label>Default secondary hold (seconds)</label>
+          <input type="number" id="set-hold" min="0.2" max="10" step="0.1">
+        </div>
       </div>
-      <div class="field">
-        <label>Default secondary hold (seconds)</label>
-        <input type="number" id="set-hold" min="0.2" max="10" step="0.1">
+      <div>
+        <h2>MIDI</h2>
+        <div class="field">
+          <label>Program numbers start at</label>
+          <select id="set-pcbase">
+            <option value="0">0 (raw MIDI)</option>
+            <option value="1">1 (MainStage-style)</option>
+          </select>
+        </div>
+        <h2 style="margin-top:24px">Expression Panel</h2>
+        <div class="field">
+          <label>Panel width: <span id="set-width-val"></span>% of screen</label>
+          <input type="range" id="set-width" min="5" max="30" step="1">
+        </div>
+      </div>
+      <div>
+        <h2>Live Status</h2>
+        <div id="statusbox">connecting…</div>
       </div>
     </div>
-    <div>
-      <h2>MIDI</h2>
-      <div class="field">
-        <label>Program numbers start at</label>
-        <select id="set-pcbase">
-          <option value="0">0 (raw MIDI)</option>
-          <option value="1">1 (MainStage-style)</option>
-        </select>
-      </div>
-    </div>
-    <div>
-      <h2>Expression Panel</h2>
-      <div class="field">
-        <label>Panel width: <span id="set-width-val"></span>% of screen</label>
-        <input type="range" id="set-width" min="5" max="30" step="1">
-      </div>
-    </div>
-    <div>
-      <h2>Live Status</h2>
-      <div id="statusbox">connecting…</div>
-    </div>
-  </aside>
-</div>
+  </div>
+</main>
 
 <script>
 const TYPE_NAMES = {
@@ -194,6 +207,7 @@ const FIELDS = {
 };
 
 let config = null;
+let currentTab = "overview"; // "overview" | "global" | menu id (number)
 let currentMenu = 1;
 let selected = new Set(); // multi-edit selection (button numbers, current menu)
 let edits = {};           // n -> {primary, secondary} working copies
@@ -230,7 +244,114 @@ function actionMeta(a) {
     default: return "Nothing";
   }
 }
-function actionColor(a) { return (a && (a.on_color || a.color)) || "#0f0f0f"; }
+
+/* ---------- tabs ---------- */
+
+const TABS = [
+  ["overview", "Overview"], [1, "Menu 1"], [2, "Menu 2"], [3, "Menu 3"], [4, "Menu 4"],
+  ["global", "Global Settings"],
+];
+
+function renderTabs() {
+  const nav = $("tabs");
+  nav.innerHTML = "";
+  for (const [id, name] of TABS) {
+    const b = document.createElement("button");
+    b.textContent = typeof id === "number" ? (menuById(id).name || name) : name;
+    b.className = id === currentTab ? "active" : "";
+    b.onclick = () => switchTab(id);
+    nav.appendChild(b);
+  }
+}
+
+function switchTab(id, keepSelection) {
+  currentTab = id;
+  if (typeof id === "number" && currentMenu !== id) {
+    currentMenu = id;
+    if (!keepSelection) selected.clear();
+  }
+  $("view-overview").hidden = id !== "overview";
+  $("view-menu").hidden = typeof id !== "number";
+  $("view-global").hidden = id !== "global";
+  renderTabs();
+  if (id === "overview") renderOverview();
+  if (typeof id === "number") renderCards();
+}
+
+/* ---------- overview: all 36 slots ---------- */
+
+function renderOverview() {
+  const view = $("view-overview");
+  view.innerHTML = "";
+  const hint = document.createElement("div");
+  hint.className = "hint";
+  hint.textContent = "All four menus. Swatches: primary on · secondary on · off. Click a panel to edit it.";
+  view.appendChild(hint);
+  for (const menu of config.menus) {
+    const section = document.createElement("div");
+    section.className = "ov-menu";
+    const h2 = document.createElement("h2");
+    h2.textContent = menu.name || `Menu ${menu.id}`;
+    section.appendChild(h2);
+    const grid = document.createElement("div");
+    grid.className = "ov-grid";
+    for (let n = 1; n <= 10; n++) {
+      grid.appendChild(n === 10 ? shiftCell() : overviewCell(menu.id, n));
+    }
+    section.appendChild(grid);
+    view.appendChild(section);
+  }
+}
+
+function shiftCell() {
+  const cell = document.createElement("div");
+  cell.className = "cell shift";
+  cell.textContent = "B10 · Shift / Menu";
+  return cell;
+}
+
+function overviewCell(menuId, n) {
+  const cell = document.createElement("div");
+  cell.className = "cell";
+  const slot = slotOf(menuId, n);
+  const a = slot && slot.primary;
+  const sec = slot && slot.secondary && slot.secondary.enabled ? slot.secondary : null;
+
+  // Swatches in fixed order: primary on, secondary on, off.
+  const swatches = [];
+  if (a && a.type !== "nothing") swatches.push([a.on_color, "primary on"]);
+  else if (a) swatches.push([a.color, "color"]);
+  if (sec) swatches.push([sec.action.on_color, "secondary on"]);
+  if (a && a.off_color) swatches.push([a.off_color, "off"]);
+
+  cell.innerHTML = `
+    <div class="head"><span class="num">B${n}</span><span class="swatches"></span></div>
+    <div class="label"></div>
+    <div class="meta"></div>
+    <div class="hold"></div>`;
+  const box = cell.querySelector(".swatches");
+  for (const [color, title] of swatches) {
+    const sw = document.createElement("span");
+    sw.className = "sw";
+    sw.style.background = color || "#0f0f0f";
+    sw.title = title;
+    box.appendChild(sw);
+  }
+  cell.querySelector(".label").textContent = (a && a.label) || (a ? "" : "—");
+  cell.querySelector(".meta").textContent = actionMeta(a);
+  cell.querySelector(".hold").textContent =
+    sec ? `Hold ${sec.hold_seconds}s for ${sec.action.label || TYPE_NAMES[sec.action.type]}` : "";
+  cell.onclick = () => {
+    currentMenu = menuId;
+    selected = new Set([n]);
+    switchTab(menuId, true);
+    const card = $("card-" + n);
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  return cell;
+}
+
+/* ---------- menu tab: in-depth cards in the physical 5x2 layout ---------- */
 
 function buildEdits() {
   edits = {};
@@ -244,77 +365,28 @@ function buildEdits() {
   }
 }
 
-/* ---------- tabs + panel grid ---------- */
-
-function renderTabs() {
-  const nav = $("tabs");
-  nav.innerHTML = "";
-  for (const menu of config.menus) {
-    const b = document.createElement("button");
-    b.textContent = menu.name || `Menu ${menu.id}`;
-    b.className = menu.id === currentMenu ? "active" : "";
-    b.onclick = () => { currentMenu = menu.id; selected.clear(); render(); };
-    nav.appendChild(b);
-  }
-}
-
-function renderGrid() {
-  const grid = $("grid");
-  grid.innerHTML = "";
+function renderCards() {
+  buildEdits();
+  const wrap = $("cards");
+  wrap.innerHTML = "";
   for (let n = 1; n <= 10; n++) {
-    const cell = document.createElement("div");
     if (n === 10) {
-      cell.className = "cell shift";
-      cell.textContent = "B10 · Shift / Menu";
-      grid.appendChild(cell);
-      continue;
+      const card = document.createElement("div");
+      card.className = "card shift";
+      card.textContent = "B10 · Shift / Menu";
+      wrap.appendChild(card);
+    } else {
+      wrap.appendChild(buildCard(n));
     }
-    cell.className = "cell" + (selected.has(n) ? " selected" : "");
-    cell.id = "cell-" + n;
-    const slot = slotOf(currentMenu, n);
-    const a = slot && slot.primary;
-    const sec = slot && slot.secondary && slot.secondary.enabled ? slot.secondary : null;
-    cell.innerHTML = `
-      <div class="head"><span class="num">B${n}</span><span class="swatch"></span></div>
-      <div class="label"></div>
-      <div class="meta"></div>
-      <div class="hold"></div>`;
-    cell.querySelector(".swatch").style.background = actionColor(a);
-    cell.querySelector(".label").textContent = (a && a.label) || (a ? "" : "—");
-    cell.querySelector(".meta").textContent = actionMeta(a);
-    cell.querySelector(".hold").textContent =
-      sec ? `Hold ${sec.hold_seconds}s for ${sec.action.label || TYPE_NAMES[sec.action.type]}` : "";
-    cell.onclick = e => {
-      if (e.shiftKey) {
-        selected.has(n) ? selected.delete(n) : selected.add(n);
-      } else {
-        selected = new Set([n]);
-        const card = $("card-" + n);
-        if (card) card.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      }
-      refreshSelection();
-    };
-    grid.appendChild(cell);
   }
+  refreshSelection();
 }
 
 function refreshSelection() {
   for (let n = 1; n <= 9; n++) {
-    const cell = $("cell-" + n), card = $("card-" + n);
-    if (cell) cell.classList.toggle("selected", selected.has(n));
+    const card = $("card-" + n);
     if (card) card.classList.toggle("selected", selected.has(n));
   }
-}
-
-/* ---------- editor cards ---------- */
-
-function render() { renderTabs(); renderGrid(); buildEdits(); renderEditors(); }
-
-function renderEditors() {
-  const wrap = $("editors");
-  wrap.innerHTML = "";
-  for (let n = 1; n <= 9; n++) wrap.appendChild(buildCard(n));
-  refreshSelection();
 }
 
 function rebuildCard(n) {
@@ -328,6 +400,14 @@ function buildCard(n) {
   card.className = "card";
   card.id = "card-" + n;
   const edit = edits[n];
+
+  // Click anywhere that isn't a control to (shift-)select this button.
+  card.onclick = e => {
+    if (e.target.closest("input, select, button, label, option")) return;
+    if (e.shiftKey) selected.has(n) ? selected.delete(n) : selected.add(n);
+    else selected = selected.has(n) && selected.size === 1 ? new Set() : new Set([n]);
+    refreshSelection();
+  };
 
   const title = document.createElement("h3");
   title.innerHTML = `B${n}${edit.secondary ? '<span class="sec-tag">has secondary</span>' : ""}`;
@@ -498,20 +578,17 @@ function actionForm(n, role) {
 function applySavedSlot(n, slot) {
   menuById(currentMenu).slots = menuById(currentMenu).slots || {};
   menuById(currentMenu).slots[String(n)] = slot;
-  refreshCell(n);
-}
-
-function refreshCell(n) {
-  const cell = $("cell-" + n);
-  if (!cell) return;
-  const slot = slotOf(currentMenu, n);
-  const a = slot && slot.primary;
-  const sec = slot && slot.secondary && slot.secondary.enabled ? slot.secondary : null;
-  cell.querySelector(".swatch").style.background = actionColor(a);
-  cell.querySelector(".label").textContent = (a && a.label) || (a ? "" : "—");
-  cell.querySelector(".meta").textContent = actionMeta(a);
-  cell.querySelector(".hold").textContent =
-    sec ? `Hold ${sec.hold_seconds}s for ${sec.action.label || TYPE_NAMES[sec.action.type]}` : "";
+  const card = $("card-" + n);
+  if (card) {
+    const tag = card.querySelector(".sec-tag");
+    const has = slot.secondary && slot.secondary.enabled;
+    if (has && !tag) {
+      const span = document.createElement("span");
+      span.className = "sec-tag";
+      span.textContent = "has secondary";
+      card.querySelector("h3").appendChild(span);
+    } else if (!has && tag) tag.remove();
+  }
 }
 
 async function post(n, path, payload) {
@@ -541,7 +618,7 @@ function removeSecondary(n) {
   post(n, "/api/slot/secondary/remove", { menu_id: currentMenu, button_num: n });
 }
 
-/* ---------- sidebar settings ---------- */
+/* ---------- global settings tab ---------- */
 
 function initSettings() {
   $("set-shift").value = config.buttons.shift_hold_seconds;
@@ -561,7 +638,7 @@ function initSettings() {
   $("set-pcbase").onchange = async () => {
     await saveSettings({ program_display_base: parseInt($("set-pcbase").value, 10) });
     config = await api("/api/config");
-    render();
+    switchTab(currentTab, true);
   };
 }
 
@@ -612,8 +689,8 @@ async function pollStatus() {
 async function load() {
   try {
     config = await api("/api/config");
-    render();
     initSettings();
+    switchTab("overview");
     pollStatus();
     setInterval(pollStatus, 2000);
   } catch (err) {
