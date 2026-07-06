@@ -5,18 +5,22 @@ journal. Later milestones wire the placeholder modules into a real event loop.
 """
 
 import logging
+import queue
 import signal
 import sys
 import time
 
 from config.loader import load_config
 from hardware import constants
+from hardware.buttons import ButtonReader
+from logic.menu import MenuLogic
 from midi.engine import MidiEngine
 from state.manager import StateManager
 from ui.renderer import UiRenderer
 from web.server import WebServer
 
-HEARTBEAT_SECONDS = 5.0
+HEARTBEAT_SECONDS = 30.0
+TICK_SECONDS = 0.01
 
 log = logging.getLogger("controller")
 
@@ -45,6 +49,11 @@ def main() -> int:
     for module in (midi, ui, web):
         module.start()
 
+    events: queue.Queue = queue.Queue()
+    buttons = ButtonReader(config, events.put)
+    buttons.start()
+    menu_logic = MenuLogic(config, state)
+
     running = True
 
     def handle_signal(signum, frame):
@@ -57,10 +66,21 @@ def main() -> int:
     # Debug: `kill -USR1 <pid>` saves the current frame to /tmp/controller-frame.png.
     signal.signal(signal.SIGUSR1, lambda s, f: ui.request_screenshot())
 
+    next_heartbeat = 0.0
     while running:
-        log.info("heartbeat: menu %d", state.current_menu)
-        time.sleep(HEARTBEAT_SECONDS)
+        try:
+            event = events.get(timeout=TICK_SECONDS)
+        except queue.Empty:
+            event = None
+        if event is not None:
+            menu_logic.handle_event(event)
+        now = time.monotonic()
+        menu_logic.tick(now)
+        if now >= next_heartbeat:
+            log.info("heartbeat: menu %d", state.current_menu)
+            next_heartbeat = now + HEARTBEAT_SECONDS
 
+    buttons.stop()
     for module in (web, ui, midi):
         module.stop()
     log.info("goodbye controller")

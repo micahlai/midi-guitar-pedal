@@ -63,9 +63,25 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
 - Gotcha: monitors/PiP scalers can serve stale or bogus EDIDs; a swap while
   the app runs needs a service restart (SDL doesn't re-modeset on hotplug).
 
+### Milestone 3 — GPIO Buttons (2026-07-05, pending physical button test)
+- `hardware/buttons.py`: gpiozero (lgpio) reading of all 10 buttons, internal
+  pull-ups, config-driven debounce (30 ms), raw press/release events with
+  monotonic timestamps pushed to a thread-safe queue.
+- `logic/menu.py`: pure logic, no hardware imports — shift toggle Menu 1<->2
+  (Menu 3/4 short-press returns to Menu 1), Shift+B5 -> Menu 3 (B5 suppressed,
+  Menu 4 timer cancelled), Shift hold 2.0 s -> Menu 4 (release then inert),
+  B1-B9 press/release/hold-threshold events via on_action_event callback for
+  later milestones.
+- `main.py` loop reworked: 10 ms event/tick loop feeding MenuLogic; heartbeat
+  now every 30 s.
+- `tests/test_menu_logic.py`: 9 unit tests covering the shift/menu matrix, all
+  passing (run from `app/`: `python3 -m unittest discover tests`).
+- Deployed; service logs "watching 10 buttons". Physical press verification
+  awaits wired buttons.
+
 ## Current Milestone
 
-Milestone 3 — GPIO Buttons
+Milestone 3 — GPIO Buttons (physical verification), then Milestone 4
 
 ## Decisions Made
 
