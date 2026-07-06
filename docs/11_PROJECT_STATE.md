@@ -239,6 +239,26 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   regenerate it from defaults.
 - 66 unit tests passing (18 web: validation, slot edits, settings, HTTP).
 
+### Post-M12 — program number display base (2026-07-05, user-directed)
+- User's rig (MainStage) numbers patches from 1 but MIDI PC is 0-based;
+  "sending 1 sent 2". `midi.program_display_base` (0 or 1, default 1) now
+  actually drives behavior:
+  - config stores program_number AS DISPLAYED (base..127+base; web editor
+    rejects 0 when base is 1); the wire always sends number - base
+    (clamped 0-127) in ActionLogic.
+  - renderer: PGM panel shows wire + base; program_change active-color
+    compares current_program (wire, from feedback) == stored - base.
+  - `/api/settings` accepts program_display_base; changing it SHIFTS every
+    stored program_number (primaries + secondaries, all menus) by the delta
+    so the wire values / targeted patches stay identical. Web sidebar gained
+    a "Program numbers start at" selector (re-fetches config after, since
+    numbers move).
+- Existing user config needed no migration: numbers were already entered
+  1-based with base=1 backfilled, so the fix applied immediately.
+- Verified on the Pi: base 1->0->1 round-trips the user's stored numbers
+  (1,2,3,4 -> 0,1,2,3 -> 1,2,3,4); PC 0 rejected at base 1 ("must be an
+  integer 1-128"). 73 unit tests passing.
+
 ## Current Milestone
 
 Milestone 13 — Image Upload

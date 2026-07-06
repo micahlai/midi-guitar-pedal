@@ -78,7 +78,12 @@ class ActionLogic:
         if kind in ("effect_cc", "action_cc"):
             self.midi.send_note(action["midi_channel"], action["cc_number"], 127)
         elif kind == "program_change":
-            self.midi.send_program_change(action["midi_channel"], action["program_number"])
+            # Config stores the number as the user's rig displays it; the wire
+            # value is offset by program_display_base (MainStage lists are
+            # 1-based while MIDI PC is 0-based).
+            base = self.config["midi"]["program_display_base"]
+            wire = max(0, min(127, action["program_number"] - base))
+            self.midi.send_program_change(action["midi_channel"], wire)
         elif kind == "expression_pedal":
             mode = (menu, num, role)
             if self.expression is not None:

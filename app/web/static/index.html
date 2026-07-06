@@ -122,6 +122,16 @@
       </div>
     </div>
     <div>
+      <h2>MIDI</h2>
+      <div class="field">
+        <label>Program numbers start at</label>
+        <select id="set-pcbase">
+          <option value="0">0 (raw MIDI)</option>
+          <option value="1">1 (MainStage-style)</option>
+        </select>
+      </div>
+    </div>
+    <div>
       <h2>Expression Panel</h2>
       <div class="field">
         <label>Panel width: <span id="set-width-val"></span>% of screen</label>
@@ -174,7 +184,7 @@ const FIELDS = {
     ["default_color", "Default color", "color"], ["pressed_color", "Pressed color", "color"],
   ],
   program_change: [
-    ["midi_channel", "MIDI channel", "chan"], ["program_number", "Program number", "midi7"],
+    ["midi_channel", "MIDI channel", "chan"], ["program_number", "Program number", "pc"],
     ["inactive_color", "Inactive color", "color"], ["active_color", "Active color", "color"],
   ],
   expression_pedal: [
@@ -338,9 +348,10 @@ function actionForm(action, allowedTypes, onTypeChange) {
       input.type = "color"; input.value = action[key];
       input.oninput = () => { action[key] = input.value.toUpperCase(); };
     } else {
+      const base = config.midi.program_display_base;
       input.type = "number";
-      input.min = kind === "chan" ? 1 : 0;
-      input.max = kind === "chan" ? 16 : 127;
+      input.min = kind === "chan" ? 1 : kind === "pc" ? base : 0;
+      input.max = kind === "chan" ? 16 : kind === "pc" ? 127 + base : 127;
       input.value = action[key];
       input.oninput = () => { action[key] = parseInt(input.value, 10); };
     }
@@ -445,6 +456,7 @@ async function saveEditor() {
 function initSettings() {
   $("set-shift").value = config.buttons.shift_hold_seconds;
   $("set-hold").value = config.buttons.secondary_hold_default_seconds;
+  $("set-pcbase").value = config.midi.program_display_base;
   const width = Math.round(config.ui.expression_panel_width_ratio * 100);
   $("set-width").value = width;
   $("set-width-val").textContent = width;
@@ -454,15 +466,25 @@ function initSettings() {
   $("set-width").oninput = () => { $("set-width-val").textContent = $("set-width").value; };
   $("set-width").onchange = () =>
     saveSettings({ expression_panel_width_ratio: parseInt($("set-width").value, 10) / 100 });
+  // Changing the base re-numbers every stored program server-side, so pull
+  // the whole config back down and re-render.
+  $("set-pcbase").onchange = async () => {
+    await saveSettings({ program_display_base: parseInt($("set-pcbase").value, 10) });
+    config = await api("/api/config");
+    TEMPLATES.program_change.program_number = config.midi.program_display_base;
+    render();
+  };
 }
 
 async function saveSettings(payload) {
   setStatus("saving…");
   try {
     const data = await api("/api/settings", payload);
-    Object.assign(config.buttons, data.settings);
-    if ("expression_panel_width_ratio" in data.settings)
-      config.ui.expression_panel_width_ratio = data.settings.expression_panel_width_ratio;
+    for (const [key, value] of Object.entries(data.settings)) {
+      if (key === "expression_panel_width_ratio") config.ui[key] = value;
+      else if (key === "program_display_base") config.midi[key] = value;
+      else config.buttons[key] = value;
+    }
     setStatus("saved", "ok");
   } catch (err) {
     setStatus("save failed: " + err.message, "err");
@@ -485,7 +507,8 @@ async function pollStatus() {
   try {
     const s = await api("/api/status");
     $("statusbox").innerHTML = `
-      <div>Menu: <b>${s.current_menu}</b> &nbsp; Program: <b>${s.current_program ?? "—"}</b></div>
+      <div>Menu: <b>${s.current_menu}</b> &nbsp; Program: <b>${s.current_program === null
+        ? "—" : s.current_program + config.midi.program_display_base}</b></div>
       <div>Pedal: <b>${s.expression_detected ? "detected" : "not detected"}</b></div>
       <div>Mode: <b></b></div>
       <div class="expbar"><div style="width:${Math.round(s.expression_value * 100)}%"></div></div>`;
@@ -500,6 +523,7 @@ async function pollStatus() {
 async function load() {
   try {
     config = await api("/api/config");
+    TEMPLATES.program_change.program_number = config.midi.program_display_base;
     render();
     initSettings();
     pollStatus();

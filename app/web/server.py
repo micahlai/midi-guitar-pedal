@@ -66,7 +66,7 @@ def _seconds(value, name, lo, hi):
     return round(float(value), 2)
 
 
-def validate_action(raw, allowed_types, allow_image: bool) -> dict:
+def validate_action(raw, allowed_types, allow_image: bool, pc_base: int = 0) -> dict:
     """Validate a full action dict from the client, returning a normalized
     copy with exactly the fields the config schema defines for its type."""
     if not isinstance(raw, dict):
@@ -102,7 +102,14 @@ def validate_action(raw, allowed_types, allow_image: bool) -> dict:
         action["default_color"] = _color(raw.get("default_color"), "default_color")
         action["pressed_color"] = _color(raw.get("pressed_color"), "pressed_color")
     elif action_type == "program_change":
-        action["program_number"] = _midi7(raw.get("program_number"), "program_number")
+        # Stored in the rig's numbering: wire value + program_display_base.
+        number = raw.get("program_number")
+        if (not isinstance(number, int) or isinstance(number, bool)
+                or not pc_base <= number <= 127 + pc_base):
+            raise ValueError(
+                f"program_number must be an integer {pc_base}-{127 + pc_base}"
+            )
+        action["program_number"] = number
         action["inactive_color"] = _color(raw.get("inactive_color"), "inactive_color")
         action["active_color"] = _color(raw.get("active_color"), "active_color")
     elif action_type == "expression_pedal":
@@ -136,7 +143,8 @@ def _clear_stale_expression_mode(state: StateManager, menu_id, button_num, role,
 
 
 def set_primary(state: StateManager, menu_id, button_num, raw_action) -> dict:
-    action = validate_action(raw_action, ACTION_TYPES, allow_image=True)
+    action = validate_action(raw_action, ACTION_TYPES, allow_image=True,
+                             pc_base=state.config["midi"]["program_display_base"])
     slot = _get_slot_for_edit(state, menu_id, button_num)
     slot["primary"] = action
     _clear_stale_expression_mode(state, menu_id, button_num, "primary", action)
@@ -144,7 +152,8 @@ def set_primary(state: StateManager, menu_id, button_num, raw_action) -> dict:
 
 
 def set_secondary(state: StateManager, menu_id, button_num, hold_seconds, raw_action) -> dict:
-    action = validate_action(raw_action, SECONDARY_ACTION_TYPES, allow_image=False)
+    action = validate_action(raw_action, SECONDARY_ACTION_TYPES, allow_image=False,
+                             pc_base=state.config["midi"]["program_display_base"])
     hold = _seconds(hold_seconds, "hold_seconds", 0.2, 10.0)
     slot = _get_slot_for_edit(state, menu_id, button_num)
     if slot.get("primary") is None:
@@ -161,9 +170,24 @@ def remove_secondary(state: StateManager, menu_id, button_num) -> dict:
     return slot
 
 
+def _iter_all_actions(config: dict):
+    for menu in config["menus"]:
+        for slot in menu.get("slots", {}).values():
+            if slot.get("primary"):
+                yield slot["primary"]
+            secondary = slot.get("secondary")
+            if secondary and secondary.get("action"):
+                yield secondary["action"]
+
+
 def apply_settings(config: dict, payload: dict) -> dict:
     """Validate and apply the editable global settings; returns what changed."""
     updates = {}
+    if "program_display_base" in payload:
+        base = payload["program_display_base"]
+        if base not in (0, 1):
+            raise ValueError("program_display_base must be 0 or 1")
+        updates["program_display_base"] = (config["midi"], "program_display_base", base)
     if "shift_hold_seconds" in payload:
         updates["shift_hold_seconds"] = (
             config["buttons"], "shift_hold_seconds",
@@ -184,10 +208,18 @@ def apply_settings(config: dict, payload: dict) -> dict:
         )
     if not updates:
         raise ValueError("no editable settings in request")
+    old_base = config["midi"]["program_display_base"]
     applied = {}
     for name, (target, key, value) in updates.items():
         target[key] = value
         applied[name] = value
+    # A base change re-numbers every stored program so the wire values (and
+    # thus the patches actually targeted) stay the same.
+    delta = config["midi"]["program_display_base"] - old_base
+    if delta:
+        for action in _iter_all_actions(config):
+            if action.get("type") == "program_change":
+                action["program_number"] += delta
     return applied
 
 

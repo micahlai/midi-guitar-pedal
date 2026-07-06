@@ -79,6 +79,57 @@ class ValidateActionTests(unittest.TestCase):
                 validate_action(raw, allowed, allow_image=True)
 
 
+class ProgramDisplayBaseTests(unittest.TestCase):
+    def pc_action(self, number):
+        return {
+            "type": "program_change", "midi_channel": 1, "program_number": number,
+            "inactive_color": "#303030", "active_color": "#3399FF",
+            "label": "PATCH", "image_asset_id": None,
+        }
+
+    def test_base1_rejects_zero_and_allows_128(self):
+        with self.assertRaises(ValueError):
+            validate_action(self.pc_action(0), ("program_change",), True, pc_base=1)
+        action = validate_action(self.pc_action(128), ("program_change",), True, pc_base=1)
+        self.assertEqual(action["program_number"], 128)
+
+    def test_base0_rejects_128_and_allows_zero(self):
+        with self.assertRaises(ValueError):
+            validate_action(self.pc_action(128), ("program_change",), True, pc_base=0)
+        action = validate_action(self.pc_action(0), ("program_change",), True, pc_base=0)
+        self.assertEqual(action["program_number"], 0)
+
+    def test_set_primary_uses_config_base(self):
+        state = make_state()  # default base is 1
+        with self.assertRaises(ValueError):
+            set_primary(state, 1, 4, self.pc_action(0))
+        state.config["midi"]["program_display_base"] = 0
+        set_primary(state, 1, 4, self.pc_action(0))
+
+    def test_base_change_shifts_all_program_numbers(self):
+        config = default_config()  # base 1; RHYTHM=1, LEAD=2, SOLO secondary=3
+        apply_settings(config, {"program_display_base": 0})
+        slots = config["menus"][0]["slots"]
+        self.assertEqual(slots["4"]["primary"]["program_number"], 0)
+        self.assertEqual(slots["5"]["primary"]["program_number"], 1)
+        self.assertEqual(slots["1"]["secondary"]["action"]["program_number"], 2)
+        # Non-PC actions untouched.
+        self.assertEqual(slots["2"]["primary"]["cc_number"], 22)
+        # And back up again.
+        apply_settings(config, {"program_display_base": 1})
+        self.assertEqual(slots["4"]["primary"]["program_number"], 1)
+        self.assertEqual(slots["1"]["secondary"]["action"]["program_number"], 3)
+
+    def test_same_base_is_a_no_op_shift(self):
+        config = default_config()
+        apply_settings(config, {"program_display_base": 1})
+        self.assertEqual(config["menus"][0]["slots"]["4"]["primary"]["program_number"], 1)
+
+    def test_rejects_invalid_base(self):
+        with self.assertRaises(ValueError):
+            apply_settings(default_config(), {"program_display_base": 2})
+
+
 class SlotEditTests(unittest.TestCase):
     def test_set_primary_replaces_action(self):
         state = make_state()

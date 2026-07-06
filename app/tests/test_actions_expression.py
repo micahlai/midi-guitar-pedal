@@ -39,6 +39,13 @@ class ActionLogicTest(unittest.TestCase):
         self.assertEqual(len(self.midi.sent), 1)  # release sends nothing
 
     def test_program_change_sends_pc(self):
+        # LEAD is stored as program 2 in the rig's 1-based numbering
+        # (program_display_base 1) -> wire value 1.
+        self.logic.on_button_event(5, "press", 0.0)
+        self.assertEqual(self.midi.sent, [("pc", 1, 1)])
+
+    def test_program_change_base_zero_sends_raw(self):
+        self.config["midi"]["program_display_base"] = 0
         self.logic.on_button_event(5, "press", 0.0)  # LEAD, program 2
         self.assertEqual(self.midi.sent, [("pc", 1, 2)])
 
@@ -66,10 +73,10 @@ class ActionLogicTest(unittest.TestCase):
     def test_secondary_fires_on_hold_and_release_is_inert(self):
         self.logic.on_button_event(1, "press", 0.0)
         self.logic.tick(1.5)
-        self.assertEqual(self.midi.sent, [("pc", 1, 3)])  # secondary SOLO
+        self.assertEqual(self.midi.sent, [("pc", 1, 2)])  # SOLO: stored 3, base 1
         self.logic.tick(2.0)  # does not refire
         self.logic.on_button_event(1, "release", 2.5)  # no primary
-        self.assertEqual(self.midi.sent, [("pc", 1, 3)])
+        self.assertEqual(self.midi.sent, [("pc", 1, 2)])  # SOLO: stored 3, base 1
 
     def test_primary_without_secondary_fires_immediately(self):
         self.logic.on_button_event(2, "press", 0.0)  # DELAY, no secondary
@@ -82,7 +89,7 @@ class ActionLogicTest(unittest.TestCase):
         self.logic.tick(2.0)  # past default 1.5 but below slot's 3.0
         self.assertEqual(self.midi.sent, [])
         self.logic.tick(3.0)
-        self.assertEqual(self.midi.sent, [("pc", 1, 3)])
+        self.assertEqual(self.midi.sent, [("pc", 1, 2)])  # SOLO: stored 3, base 1
 
 
 class MapValueTest(unittest.TestCase):

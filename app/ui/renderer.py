@@ -145,8 +145,11 @@ class UiRenderer:
                 # Shift/Menu panel: shows menu state, never a user assignment.
                 text = font_big.render(f"MENU {self.state.current_menu}", True, pygame.Color(theme["text"]))
                 surface.blit(text, text.get_rect(centerx=rect.centerx, centery=rect.centery - 24))
-                # Debug: current program (raw 0-127) as received via MIDI.
+                # Current program as received via MIDI, shown in the rig's
+                # numbering (wire value + program_display_base).
                 program = self.state.current_program
+                if program is not None:
+                    program += self.state.config["midi"]["program_display_base"]
                 pgm = font_small.render(
                     f"PGM {'—' if program is None else program}", True,
                     pygame.Color(theme["disabled"]),
@@ -198,7 +201,8 @@ class UiRenderer:
             pressed = button_num in state.pressed_buttons
             return primary["pressed_color"] if pressed else primary["default_color"]
         if kind == "program_change":
-            active = state.current_program == primary["program_number"]
+            base = state.config["midi"]["program_display_base"]
+            active = state.current_program == primary["program_number"] - base
             return primary["active_color"] if active else primary["inactive_color"]
         if kind == "expression_pedal":
             active = (state.expression_mode is not None
