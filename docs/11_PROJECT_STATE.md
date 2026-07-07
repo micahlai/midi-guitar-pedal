@@ -598,6 +598,118 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   app boot screen (same artwork + messages) -> UI. Verify nothing regressed
   in the app itself. Revert notes are in the setup script header.
 
+### Post-M16 — hold-bar framerate optimization (2026-07-06)
+- Problem: while a hold bar animated, the frame signature went None and the
+  renderer did a FULL redraw (all 10 panels, header, font renders) plus a
+  `pygame.image.tobytes` convert+copy of the whole 1920x480 canvas every
+  frame at a 60 fps target — too much for the Zero 2 W, choppy bar.
+- Fix 1 — base-frame caching: `_frame_signature` no longer returns None on
+  holds (it now describes the static BASE frame only); `_run` keeps the base
+  on a cached surface, and each animation frame just blits it and redraws
+  ONLY the held panels (`_draw_holds` -> `_draw_panel`, B10 factored into
+  `_draw_shift_panel`; `_draw_hold_bar` takes a holds snapshot dict).
+- Fix 2 — zero-copy GL upload: `_canvas_upload_mode()` inspects the canvas
+  masks/pitch; when the layout is 4 bytes/pixel XRGB/XBGR with no row
+  padding, the locked surface's `_pixels_address` goes straight to
+  `glTexSubImage2D` and the gles fragment shader swizzles (.rgb/.bgr,
+  `CanvasPresenter(swizzle=)`); unknown layouts fall back to tobytes("RGBA").
+- Headless verification (Mac scratch venv, SDL dummy): composed frame is
+  pixel-correct (bar heights at 50%/25%, content on top, pixels outside held
+  panels identical to base); per-frame cost 1.80 ms -> 0.29 ms (6.2x) before
+  even counting the removed GL-upload copy. Upload mode resolved to
+  ("bgr", direct) on the dummy driver — same XRGB8888 expected on kmsdrm.
+- 181 unit tests passing (new: upload-mode table; hold no longer dirties
+  the signature).
+- NOT yet deployed/verified on the Pi (deploy not part of the request):
+  `./deploy.sh`, then hold B1 / Shift and watch the bar smoothness; check
+  journal for no "draw failed" and idle CPU still low.
+
+### Post-M16 — BLE "found but offline" root cause: btmgmt no-ops without a
+### TTY (2026-07-06)
+- Symptom: pedal listed but offline/unconnectable in the Mac's Audio MIDI
+  Setup Bluetooth window; a CoreBluetooth scan from the Mac found NO
+  advertisement at all.
+- Root cause (btmon-confirmed): `btmgmt` run via subprocess WITHOUT a
+  controlling terminal opens the MGMT socket and sends ZERO commands until
+  timeout kills it. The app's legacy-advertising fallback has therefore
+  never actually armed the radio from the service; every past success was
+  from an interactive shell (tty). The "advertising via btmgmt (legacy)"
+  log line was a false positive.
+- Fix in `midi/ble.py _btmgmt()`: run under
+  `sudo -n timeout 5 script -qec "btmgmt <args>" /dev/null` — the
+  pseudo-TTY makes btmgmt execute, print, and exit promptly. Output is now
+  returned and `_legacy_advertise` requires the literal "Instance added"
+  confirmation before logging success (logs an error otherwise). 181 tests
+  still pass.
+- VERIFIED over the air from the Mac (CoreBluetooth test script in the
+  session scratchpad): scan finds "Pi MIDI Foot Controller" with the MIDI
+  service UUID, connect + service/char discovery + notify subscription all
+  succeed — NO pairing required (adapter Pairable stayed off; the pairable
+  toggle was tested and reverted). First-ever central connection: journal
+  shows subscribe path works.
+- Audio MIDI Setup note: a previously-seen device shows "Offline" until a
+  fresh advertisement is received; it recovers by itself once advertising
+  is really up.
+- NOT DEPLOYED YET (deploy blocked in auto mode): `./deploy.sh` then check
+  `journalctl -u midi-controller | grep -i ble` for "advertising via btmgmt"
+  (real now), then connect from Audio MIDI Setup and play — also exercises
+  the M16 re-advertise-after-disconnect path, which was equally broken by
+  the tty bug and is fixed by the same change.
+
+### Post-M16 — real 1920x480 panel reconfigured (2026-07-06)
+- The desk-monitor debugging had left THREE `video=HDMI-A-1:1920x1080M@60D`
+  entries in /boot/firmware/cmdline.txt (the M2 1920x480 forced mode was
+  gone); the new physical panel's EDID advertises only bogus modes (max
+  1024x768), so the app was rendering into a cropped 1024x768 fb.
+- Fixed on the Pi: restored a single `video=HDMI-A-1:1920x480M@60D`
+  (backup at cmdline.txt.bak-1080), rebooted. Verified: fb 1920,480,
+  journal "display up: mode 1920x480", live screenshot shows the user's
+  config full-bleed.
+- splash.fb was still sized for 1024x768 — re-rendered via
+  render-splash-fb.py (now 1920x480 @ 16 bpp). boot-splash.service is
+  enabled (setup-boot-splash.sh HAS been applied; quiet/loglevel args
+  present in cmdline).
+- STILL PENDING: `./deploy.sh` (blocked in auto mode) carrying the hold-bar
+  framerate optimization AND the btmgmt-TTY BLE advertising fix — until
+  then the pedal is NOT advertising BLE after this reboot.
+
+### Post-M16 — black screen root cause: production panel is PORTRAIT-scan
+### (2026-07-06)
+- After the 1920x480 forced mode was restored the panel showed NOTHING even
+  though software looked healthy (CRTC active, screenshots fine). Fresh
+  EDID after a reboot revealed why: the panel's ONLY real modes are
+  portrait — preferred 480x1920@60 (pclk 66.28 MHz, tight blanking) plus a
+  51 Hz variant. There is NO landscape mode; the forced 1920x480 CVT
+  timings (`type: userdef` in modetest) can never sync. The earlier
+  1024x768 EDID reading was bogus/stale (M2 gotcha).
+- USER-CONFIRMED via modetest SMPTE pattern at mode #0 (480x1920): bars
+  visible, rotated 90° — panel and cabling fine, native mode syncs.
+- Fixes (LOCAL, NOT DEPLOYED — user chose to hold off):
+  - cmdline.txt on the Pi: forced video= mode REMOVED (already applied on
+    the device; kernel will pick the EDID-preferred 480x1920 on next
+    reboot). Backups: cmdline.txt.bak (M2), .bak-1080 (desk-monitor era).
+  - `hardware/constants.py DISPLAY_ROTATION_DEGREES = 90` (flip to 270 if a
+    future panel batch comes up upside down).
+  - `ui/renderer.py`: when no landscape mode fits the 1920x480 canvas, pick
+    the smallest TRANSPOSED mode and pass rotation to the presenter; log
+    line now includes rotation.
+  - `ui/gles.py`: `CanvasPresenter(rotation=0|90|180|270)` — per-rotation
+    UV table on the fullscreen quad + transposed viewport; canvas stays
+    1920x480 everywhere (screenshots unaffected).
+  - `scripts/render-splash-fb.py`: rotates the artwork CW when the fb is
+    portrait (SPLASH_ROTATE_DEGREES overrides; must match the constant).
+    Verified locally against a fake 480x1920 sysfs — preview correct.
+- 181 unit tests passing.
+- DEPLOYED AND VERIFIED (2026-07-06): user ran deploy.sh; first attempt
+  still showed rotation 0° because the kernel STILL LISTED the old userdef
+  1920x480 mode (cmdline is parsed at boot — removing the video= arg needs
+  a reboot before the phantom mode disappears from the mode list). After
+  reboot: fb 480,1920, journal "display up: mode 480x1920 ... rotation
+  90°", BLE advertising armed with real btmgmt confirmation, splash.fb
+  re-rendered at 480x1920 @ 16 bpp on the Pi. USER-CONFIRMED the panel
+  shows the UI correct and readable. DISPLAY_ROTATION_DEGREES=90 is the
+  right direction for this panel.
+
 ## Current Milestone
 
 All roadmap milestones through 16 complete. Next up: user hardware bring-up

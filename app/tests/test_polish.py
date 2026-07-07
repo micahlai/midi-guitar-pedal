@@ -34,7 +34,10 @@ class TempoTrackerTest(unittest.TestCase):
         feed_clocks(tracker, 120)
         # After a >1 s gap the old pulses must not pollute the new tempo.
         self.assertIsNone(tracker.clock(100.0))
-        bpm = feed_clocks(tracker, 90, start=100.0)
+        # Feed past a full averaging window so only clean new-tempo pulses
+        # remain (start=100.0 re-sends the reset pulse's timestamp, which a
+        # real monotonic clock never does).
+        bpm = feed_clocks(tracker, 90, start=100.0, beats=5)
         self.assertAlmostEqual(bpm, 90.0, places=1)
 
     def test_tracks_tempo_change(self):
@@ -64,9 +67,12 @@ class FrameSignatureTest(unittest.TestCase):
         self.state.config_version += 1
         self.assertNotEqual(before, self.renderer._frame_signature(0.1))
 
-    def test_none_while_hold_animates(self):
+    def test_stable_while_hold_animates(self):
+        # Hold bars are composed onto a cached base frame, so an arming hold
+        # must NOT dirty the base signature (only the held panels redraw).
+        before = self.renderer._frame_signature(0.1)
         self.state.hold_started[1] = (0.0, 1.5)
-        self.assertIsNone(self.renderer._frame_signature(0.1))
+        self.assertEqual(before, self.renderer._frame_signature(0.1))
 
     def test_changes_when_tempo_goes_stale(self):
         self.state.tempo_bpm = 120.0
@@ -74,6 +80,43 @@ class FrameSignatureTest(unittest.TestCase):
         fresh = self.renderer._frame_signature(1.0)
         stale = self.renderer._frame_signature(3.5)
         self.assertNotEqual(fresh, stale)
+
+
+class FakeCanvas:
+    """Just enough surface API for _canvas_upload_mode."""
+    def __init__(self, masks, bytesize=4, width=1920, pitch=None):
+        self._masks = masks
+        self._bytesize = bytesize
+        self._width = width
+        self._pitch = width * bytesize if pitch is None else pitch
+
+    def get_masks(self): return self._masks
+    def get_bytesize(self): return self._bytesize
+    def get_width(self): return self._width
+    def get_pitch(self): return self._pitch
+
+
+class CanvasUploadModeTest(unittest.TestCase):
+    def test_xrgb8888_is_direct_bgr(self):
+        canvas = FakeCanvas((0x00FF0000, 0x0000FF00, 0x000000FF, 0))
+        self.assertEqual(UiRenderer._canvas_upload_mode(canvas), ("bgr", True))
+
+    def test_xbgr8888_is_direct_rgb(self):
+        canvas = FakeCanvas((0x000000FF, 0x0000FF00, 0x00FF0000, 0))
+        self.assertEqual(UiRenderer._canvas_upload_mode(canvas), ("rgb", True))
+
+    def test_alpha_mask_still_direct(self):
+        canvas = FakeCanvas((0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000))
+        self.assertEqual(UiRenderer._canvas_upload_mode(canvas), ("bgr", True))
+
+    def test_row_padding_falls_back_to_conversion(self):
+        canvas = FakeCanvas((0x00FF0000, 0x0000FF00, 0x000000FF, 0),
+                            width=1918, pitch=1920 * 4)
+        self.assertEqual(UiRenderer._canvas_upload_mode(canvas), ("rgb", False))
+
+    def test_unknown_masks_fall_back_to_conversion(self):
+        canvas = FakeCanvas((0xF800, 0x07E0, 0x001F, 0), bytesize=2)
+        self.assertEqual(UiRenderer._canvas_upload_mode(canvas), ("rgb", False))
 
 
 class BootScreenTest(unittest.TestCase):

@@ -39,34 +39,55 @@ void main() {
 }
 """
 
-# Alpha forced to 1.0: this is the entire point of this module.
-FRAGMENT_SHADER = b"""
+# Alpha forced to 1.0: this is the entire point of this module. The swizzle
+# ("rgb" or "bgr") matches the canvas surface's in-memory byte order so raw
+# pixel buffers can be uploaded without a per-frame CPU conversion.
+FRAGMENT_SHADER_TEMPLATE = b"""
 precision mediump float;
 varying vec2 v_uv;
 uniform sampler2D tex;
 void main() {
-    gl_FragColor = vec4(texture2D(tex, v_uv).rgb, 1.0);
+    gl_FragColor = vec4(texture2D(tex, v_uv).%s, 1.0);
 }
 """
 
-# x, y (clip space), u, v — texture row 0 is the canvas top.
-_QUAD = (ctypes.c_float * 16)(
-    -1, -1, 0, 1,
-    +1, -1, 1, 1,
-    -1, +1, 0, 0,
-    +1, +1, 1, 0,
-)
+# Per-rotation UVs for the fullscreen quad, vertex order BL, BR, TL, TR in
+# clip space; texture row 0 is the canvas top. Rotation is how far the canvas
+# is turned CLOCKWISE on the screen (90/270 for portrait-scan panels whose
+# framebuffer is the transpose of the canvas).
+_QUAD_UVS = {
+    0: ((0, 1), (1, 1), (0, 0), (1, 0)),
+    90: ((1, 1), (1, 0), (0, 1), (0, 0)),
+    180: ((1, 0), (0, 0), (1, 1), (0, 1)),
+    270: ((0, 0), (0, 1), (1, 0), (1, 1)),
+}
+_QUAD_POS = ((-1, -1), (+1, -1), (-1, +1), (+1, +1))
+
+
+def _build_quad(rotation: int):
+    values = []
+    for pos, uv in zip(_QUAD_POS, _QUAD_UVS[rotation]):
+        values.extend(pos)
+        values.extend(uv)
+    return (ctypes.c_float * 16)(*values)
 
 
 class CanvasPresenter:
-    def __init__(self, screen_size: tuple[int, int], canvas_size: tuple[int, int]):
+    def __init__(self, screen_size: tuple[int, int], canvas_size: tuple[int, int],
+                 swizzle: str = "rgb", rotation: int = 0):
+        if swizzle not in ("rgb", "bgr"):
+            raise ValueError(f"unsupported swizzle {swizzle!r}")
+        if rotation not in _QUAD_UVS:
+            raise ValueError(f"unsupported rotation {rotation!r}")
+        self.rotation = rotation
         self.screen_w, self.screen_h = screen_size
         self.canvas_w, self.canvas_h = canvas_size
         self.gl = gl = ctypes.CDLL("libGLESv2.so.2")
         gl.glClearColor.argtypes = [ctypes.c_float] * 4
 
+        fragment_shader = FRAGMENT_SHADER_TEMPLATE % swizzle.encode()
         program = gl.glCreateProgram()
-        for kind, src in ((GL_VERTEX_SHADER, VERTEX_SHADER), (GL_FRAGMENT_SHADER, FRAGMENT_SHADER)):
+        for kind, src in ((GL_VERTEX_SHADER, VERTEX_SHADER), (GL_FRAGMENT_SHADER, fragment_shader)):
             gl.glAttachShader(program, self._compile(kind, src))
         gl.glLinkProgram(program)
         status = ctypes.c_int(0)
@@ -91,7 +112,8 @@ class CanvasPresenter:
         )
 
         stride = 4 * ctypes.sizeof(ctypes.c_float)
-        quad_addr = ctypes.cast(_QUAD, ctypes.c_void_p).value
+        self._quad = _build_quad(rotation)  # instance ref: keep alive for GL
+        quad_addr = ctypes.cast(self._quad, ctypes.c_void_p).value
         for name, offset in ((b"pos", 0), (b"uv", 2)):
             loc = gl.glGetAttribLocation(program, name)
             gl.glEnableVertexAttribArray(loc)
@@ -100,13 +122,17 @@ class CanvasPresenter:
                 ctypes.c_void_p(quad_addr + offset * ctypes.sizeof(ctypes.c_float)),
             )
 
+        # On-screen footprint: canvas dims, transposed when rotated 90/270.
+        out_w, out_h = ((self.canvas_h, self.canvas_w) if rotation in (90, 270)
+                        else (self.canvas_w, self.canvas_h))
         self._viewport = (
-            (self.screen_w - self.canvas_w) // 2,
-            (self.screen_h - self.canvas_h) // 2,
-            self.canvas_w,
-            self.canvas_h,
+            (self.screen_w - out_w) // 2,
+            (self.screen_h - out_h) // 2,
+            out_w,
+            out_h,
         )
-        log.info("GLES presenter ready, viewport %s", self._viewport)
+        log.info("GLES presenter ready, viewport %s, rotation %d°",
+                 self._viewport, rotation)
 
     def _compile(self, kind: int, src: bytes) -> int:
         gl = self.gl
@@ -122,15 +148,19 @@ class CanvasPresenter:
             raise RuntimeError(f"GLES shader compile failed: {info.value.decode()}")
         return shader
 
-    def present(self, rgba_bytes: bytes) -> None:
-        """Upload the canvas pixels and draw them centered; caller flips."""
+    def present(self, pixels) -> None:
+        """Upload the canvas pixels and draw them centered; caller flips.
+        `pixels` is either a bytes object or an int address of a raw pixel
+        buffer (zero-copy path; byte order must match the swizzle)."""
         gl = self.gl
         gl.glViewport(0, 0, self.screen_w, self.screen_h)
         gl.glClearColor(0.0, 0.0, 0.0, 1.0)
         gl.glClear(GL_COLOR_BUFFER_BIT)
+        if isinstance(pixels, int):
+            pixels = ctypes.c_void_p(pixels)
         gl.glTexSubImage2D(
             GL_TEXTURE_2D, 0, 0, 0, self.canvas_w, self.canvas_h,
-            GL_RGBA, GL_UNSIGNED_BYTE, rgba_bytes,
+            GL_RGBA, GL_UNSIGNED_BYTE, pixels,
         )
         gl.glViewport(*self._viewport)
         gl.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)

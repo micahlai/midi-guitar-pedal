@@ -63,3 +63,9 @@ BUTTON_ACTIVE_LOW = True
 
 DISPLAY_WIDTH = 1920
 DISPLAY_HEIGHT = 480
+# The production panel is a portrait-scan TCON (EDID preferred mode is
+# 480x1920, no landscape mode at all): the renderer drives it at native
+# portrait and the GL presenter rotates the landscape canvas by this many
+# degrees clockwise. Flip to 270 if the image comes up upside down on a
+# different panel batch. Only used when no landscape mode fits the canvas.
+DISPLAY_ROTATION_DEGREES = 90

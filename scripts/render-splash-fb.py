@@ -39,6 +39,13 @@ def main() -> int:
         return 1
 
     image = pygame.image.load(IMAGE)
+    # Portrait-scan panel: the framebuffer is the transpose of the landscape
+    # artwork, so rotate the artwork clockwise to match — must agree with
+    # DISPLAY_ROTATION_DEGREES in app/hardware/constants.py (pygame's rotate
+    # is counter-clockwise-positive, hence the negative angle).
+    if height > width and image.get_width() > image.get_height():
+        rotate_cw = int(os.environ.get("SPLASH_ROTATE_DEGREES", "90"))
+        image = pygame.transform.rotate(image, -rotate_cw)
     # Aspect-fill and center-crop to the framebuffer.
     iw, ih = image.get_size()
     scale = max(width / iw, height / ih)

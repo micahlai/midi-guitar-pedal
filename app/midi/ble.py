@@ -251,11 +251,16 @@ class BleMidiServer:
             log.error("adapter never powered on; BLE advertising not started")
             return
         self._btmgmt("rm-adv", "1")
-        self._btmgmt("add-adv", "-c", "-g", "-s", self._scan_rsp_hex(),
-                     "-u", MIDI_SERVICE_UUID, "1")
+        out = self._btmgmt("add-adv", "-c", "-g", "-s", self._scan_rsp_hex(),
+                           "-u", MIDI_SERVICE_UUID, "1")
+        if "Instance added" not in out:
+            log.error("btmgmt add-adv did not confirm (%r); BLE advertising "
+                      "is likely NOT running", out.strip())
+            return
         self._legacy_instance = 1
         # NOTE: bluetoothd's ActiveInstances does NOT track instances added
-        # via btmgmt (always shows 0) — verify over the air with a BLE scan.
+        # via btmgmt (always shows 0) — the "Instance added" confirmation
+        # above is the real success signal.
         log.info("BLE MIDI advertising via btmgmt (legacy) as %r", self.device_name)
 
     def _scan_rsp_hex(self) -> str:
@@ -268,15 +273,25 @@ class BleMidiServer:
         return bytes([len(name) + 1, ad_type, *name]).hex()
 
     @staticmethod
-    def _btmgmt(*args) -> None:
-        """Fire a btmgmt command; it produces no output and never exits when
-        piped, so effects can only be checked out-of-band (hence the hard
-        timeout and no result parsing)."""
+    def _btmgmt(*args) -> str:
+        """Run a btmgmt command and return its output. btmgmt issues NOTHING
+        without a controlling terminal — it opens the MGMT socket and just
+        waits (confirmed via btmon: socket opens, zero commands sent), so the
+        old plain-subprocess invocation silently no-opped. `script` provides
+        a pseudo-TTY, which also makes btmgmt print its confirmation and exit
+        promptly; `timeout` still guards the hang case. Args must stay
+        shell-safe (script -c goes through sh)."""
+        command = " ".join(("btmgmt",) + args)
         try:
-            subprocess.run(["sudo", "-n", "timeout", "5", "btmgmt", *args],
-                           capture_output=True, stdin=subprocess.DEVNULL, timeout=15)
+            result = subprocess.run(
+                ["sudo", "-n", "timeout", "5", "script", "-qec", command, "/dev/null"],
+                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                timeout=15)
+            log.debug("btmgmt %s: %s", args[0], result.stdout.strip())
+            return result.stdout
         except (OSError, subprocess.TimeoutExpired) as e:
             log.error("btmgmt %s failed: %s", args[0], e)
+            return ""
 
     @staticmethod
     def _adapter_powered() -> bool:

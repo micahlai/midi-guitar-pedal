@@ -18,7 +18,8 @@ from pathlib import Path
 from config.model import get_primary, get_secondary_action, get_slot, resolve_color
 from web.images import image_path
 from hardware import battery
-from hardware.constants import DISPLAY_HEIGHT, DISPLAY_WIDTH
+from hardware.constants import (DISPLAY_HEIGHT, DISPLAY_ROTATION_DEGREES,
+                                DISPLAY_WIDTH)
 from state.manager import StateManager
 from ui.gles import CanvasPresenter
 from version import FIRMWARE_VERSION
@@ -108,12 +109,25 @@ class UiRenderer:
             # surface, centered and unscaled on whatever mode we get. Pick the
             # smallest advertised mode that fits the canvas on both axes (the
             # real panel matches exactly; a desk monitor gets e.g. 1920x1080
-            # for debugging); if none fits, keep the current mode (cropped).
-            fitting = [
-                m for m in (pygame.display.list_modes() or [])
-                if m[0] >= DISPLAY_WIDTH and m[1] >= DISPLAY_HEIGHT
-            ]
-            target = min(fitting, key=lambda m: m[0] * m[1]) if fitting else (0, 0)
+            # for debugging). The production panel is PORTRAIT-scan (480x1920
+            # only — no landscape mode in its EDID), so when nothing fits
+            # normally, look for a transposed fit and let the GL presenter
+            # rotate the canvas. If neither fits, keep the current mode
+            # (cropped).
+            modes = pygame.display.list_modes() or []
+            fitting = [m for m in modes
+                       if m[0] >= DISPLAY_WIDTH and m[1] >= DISPLAY_HEIGHT]
+            rotation = 0
+            if fitting:
+                target = min(fitting, key=lambda m: m[0] * m[1])
+            else:
+                transposed = [m for m in modes
+                              if m[0] >= DISPLAY_HEIGHT and m[1] >= DISPLAY_WIDTH]
+                if transposed:
+                    target = min(transposed, key=lambda m: m[0] * m[1])
+                    rotation = DISPLAY_ROTATION_DEGREES
+                else:
+                    target = (0, 0)
             # OPENGL mode + the GLES presenter: SDL's plain 2D present leaves
             # the scanout plane's alpha at zero, which vc4 composites as a
             # black screen. See ui/gles.py.
@@ -127,15 +141,19 @@ class UiRenderer:
 
         w, h = screen.get_size()
         canvas = pygame.Surface((DISPLAY_WIDTH, DISPLAY_HEIGHT))
+        swizzle, direct = self._canvas_upload_mode(canvas)
         try:
-            presenter = CanvasPresenter((w, h), canvas.get_size())
+            presenter = CanvasPresenter((w, h), canvas.get_size(),
+                                        swizzle=swizzle, rotation=rotation)
         except (OSError, RuntimeError) as e:
             log.error("GLES presenter init failed: %s", e)
             pygame.quit()
             return
         log.info(
-            "display up: mode %dx%d, driver %s, UI canvas %dx%d centered",
+            "display up: mode %dx%d, driver %s, UI canvas %dx%d centered, "
+            "rotation %d°",
             w, h, pygame.display.get_driver(), DISPLAY_WIDTH, DISPLAY_HEIGHT,
+            rotation,
         )
         self._display_up_at = time.monotonic()
 
@@ -145,44 +163,83 @@ class UiRenderer:
         self._pygame = pygame
         clock = pygame.time.Clock()
 
+        def present() -> None:
+            # Zero-copy when the canvas layout allows it: hand the surface's
+            # pixel buffer straight to glTexSubImage2D (the shader swizzles
+            # channel order) instead of a per-frame tobytes convert+copy of
+            # the whole 1920x480 canvas.
+            if direct:
+                canvas.lock()
+                try:
+                    presenter.present(canvas._pixels_address)
+                finally:
+                    canvas.unlock()
+            else:
+                presenter.present(pygame.image.tobytes(canvas, "RGBA"))
+            pygame.display.flip()
+
         # Milestone 16: skip the draw + GL upload when nothing on screen can
         # have changed (signature compare) — the last flipped frame stays on
         # scanout. This takes the render thread from ~90% of a core to near
-        # idle between interactions. A draw failure shows an error screen
-        # instead of killing the UI thread.
+        # idle between interactions. While a hold bar animates, the static
+        # frame is kept on a cached base surface and only the held panels are
+        # redrawn per frame on top of a base blit. A draw failure shows an
+        # error screen instead of killing the UI thread.
+        base = pygame.Surface(canvas.get_size())
         last_signature = object()
         while self._running:
             pygame.event.pump()
+            holds = dict(self.state.hold_started)
             signature = self._frame_signature(time.monotonic())
-            if (signature is None or signature != last_signature
-                    or self.screenshot_requested):
+            base_dirty = signature != last_signature
+            if base_dirty:
                 last_signature = signature
                 try:
-                    self._draw(pygame, canvas, font_big, font_small)
+                    self._draw(pygame, base, font_big, font_small)
                 except Exception:
                     log.exception("draw failed")
-                    self._draw_error_screen(pygame, canvas, font_big, font_small)
-                presenter.present(pygame.image.tobytes(canvas, "RGBA"))
-                pygame.display.flip()
+                    self._draw_error_screen(pygame, base, font_big, font_small)
+            if base_dirty or holds or self.screenshot_requested:
+                canvas.blit(base, (0, 0))
+                if holds:
+                    try:
+                        self._draw_holds(pygame, canvas, font_big, font_small, holds)
+                    except Exception:
+                        log.exception("draw failed")
+                        self._draw_error_screen(pygame, canvas, font_big, font_small)
+                present()
                 if self.screenshot_requested:
                     self.screenshot_requested = False
                     pygame.image.save(canvas, SCREENSHOT_PATH)
                     log.info("frame saved to %s", SCREENSHOT_PATH)
-            clock.tick(HOLD_FPS if self.state.hold_started else FPS)
+            clock.tick(HOLD_FPS if holds else FPS)
 
         pygame.quit()
 
+    @staticmethod
+    def _canvas_upload_mode(canvas) -> tuple[str, bool]:
+        """(shader swizzle, direct) for uploading the canvas to GL. direct
+        means the raw pixel buffer is GL-uploadable as-is: 4 bytes/pixel with
+        no row padding and a channel order the shader can unswizzle."""
+        r, g, b, _a = canvas.get_masks()
+        if (canvas.get_bytesize() == 4
+                and canvas.get_pitch() == canvas.get_width() * 4):
+            if (r, g, b) == (0x00FF0000, 0x0000FF00, 0x000000FF):
+                return "bgr", True  # XRGB8888: bytes are B,G,R,X
+            if (r, g, b) == (0x000000FF, 0x0000FF00, 0x00FF0000):
+                return "rgb", True  # XBGR8888: bytes are R,G,B,X
+        return "rgb", False  # unknown layout: tobytes("RGBA") fallback
+
     def _frame_signature(self, now: float):
-        """Everything the frame depends on, cheap to compute; None while an
-        animation (hold bar) needs a redraw every frame. Time-driven visuals
+        """Everything the BASE frame depends on, cheap to compute. Hold bars
+        are excluded on purpose: while one animates, the base is reused and
+        only the held panels are redrawn per frame. Time-driven visuals
         (flicker, tempo staleness) enter as coarse buckets so an idle screen
         redraws at most a couple of times per second."""
         state = self.state
         if self._boot_active(now):
             # Only new boot messages repaint; leaving boot changes the shape.
             return ("boot", tuple(state.boot_messages))
-        if state.hold_started:
-            return None
         return (
             state.config_version,
             state.current_menu,
@@ -271,53 +328,84 @@ class UiRenderer:
 
         # Expression strip: only when the pedal/pot is detected; the grid
         # takes the full width otherwise (docs/08_EXPRESSION_PEDAL_SPEC.md).
+        grid_width, cell_w, cell_h = self._grid_layout(surface)
+        if self.state.expression_detected:
+            self._draw_expression(pygame, surface, font_small, grid_width,
+                                  surface.get_width() - grid_width)
+
+        # 5x2 button panel grid below the header. Physical numbering: top row
+        # B1-B5, bottom B6-B10. Hold bars are not part of the base frame; they
+        # are composed per animation frame (_draw_holds).
+        for i in range(GRID_COLS * GRID_ROWS):
+            button_num = i + 1
+            rect = self._panel_rect(pygame, button_num, cell_w, cell_h)
+            self._draw_panel(pygame, surface, font_big, font_small, rect,
+                             button_num, {})
+
+    def _grid_layout(self, surface) -> tuple[int, int, int]:
+        """(grid_width, cell_w, cell_h) for the panel grid below the header."""
         show_exp = self.state.expression_detected
         exp_ratio = self.state.config["ui"]["expression_panel_width_ratio"]
         exp_width = int(surface.get_width() * exp_ratio) if show_exp else 0
         grid_width = surface.get_width() - exp_width
-        if show_exp:
-            self._draw_expression(pygame, surface, font_small, grid_width, exp_width)
+        return (grid_width, grid_width // GRID_COLS,
+                (surface.get_height() - HEADER_HEIGHT) // GRID_ROWS)
 
-        # 5x2 button panel grid below the header. Physical numbering: top row
-        # B1-B5, bottom B6-B10.
-        cell_w = grid_width // GRID_COLS
-        cell_h = (surface.get_height() - HEADER_HEIGHT) // GRID_ROWS
-        for i in range(GRID_COLS * GRID_ROWS):
-            col, row = i % GRID_COLS, i // GRID_COLS
-            button_num = i + 1
-            rect = pygame.Rect(
-                col * cell_w + PANEL_MARGIN,
-                HEADER_HEIGHT + row * cell_h + PANEL_MARGIN,
-                cell_w - 2 * PANEL_MARGIN,
-                cell_h - 2 * PANEL_MARGIN,
-            )
-            pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), rect, border_radius=12)
-            self._draw_hold_bar(pygame, surface, rect, button_num)
+    def _panel_rect(self, pygame, button_num: int, cell_w: int, cell_h: int):
+        i = button_num - 1
+        col, row = i % GRID_COLS, i // GRID_COLS
+        return pygame.Rect(
+            col * cell_w + PANEL_MARGIN,
+            HEADER_HEIGHT + row * cell_h + PANEL_MARGIN,
+            cell_w - 2 * PANEL_MARGIN,
+            cell_h - 2 * PANEL_MARGIN,
+        )
 
-            if button_num == 10:
-                # Shift/Menu panel: menu name with "MENU n" beneath it in the
-                # small ("hold for") font, never a user assignment.
-                menu_id = self.state.current_menu
-                menu = next((m for m in self.state.config["menus"] if m["id"] == menu_id), {})
-                name = (menu.get("name") or f"Menu {menu_id}").upper()
-                text = self._fit_text(name, rect.width - 32, 72)
-                surface.blit(text, text.get_rect(centerx=rect.centerx, centery=rect.centery - 36))
-                sub = font_small.render(f"MENU {menu_id}", True, pygame.Color(theme["disabled"]))
-                surface.blit(sub, sub.get_rect(centerx=rect.centerx, centery=rect.centery + 14))
-                # Current program as received via MIDI, shown in the rig's
-                # numbering (wire value + program_display_base).
-                program = self.state.current_program
-                if program is not None:
-                    program += self.state.config["midi"]["program_display_base"]
-                pgm = font_small.render(
-                    f"PGM {'—' if program is None else program}", True,
-                    pygame.Color(theme["disabled"]),
-                )
-                surface.blit(pgm, pgm.get_rect(centerx=rect.centerx, centery=rect.centery + 54))
-                if self.state.shift_held:
-                    pygame.draw.rect(surface, pygame.Color(theme["text"]), rect, width=4, border_radius=12)
-            else:
-                self._draw_assignable_panel(pygame, surface, font_big, font_small, rect, button_num)
+    def _draw_panel(self, pygame, surface, font_big, font_small, rect,
+                    button_num: int, holds: dict) -> None:
+        """One complete panel: background, hold bar (if arming), content."""
+        pygame.draw.rect(surface, pygame.Color(self.theme["panel_background"]),
+                         rect, border_radius=12)
+        self._draw_hold_bar(pygame, surface, rect, button_num, holds)
+        if button_num == 10:
+            self._draw_shift_panel(pygame, surface, font_small, rect)
+        else:
+            self._draw_assignable_panel(pygame, surface, font_big, font_small, rect, button_num)
+
+    def _draw_shift_panel(self, pygame, surface, font_small, rect) -> None:
+        # Shift/Menu panel: menu name with "MENU n" beneath it in the
+        # small ("hold for") font, never a user assignment.
+        theme = self.theme
+        menu_id = self.state.current_menu
+        menu = next((m for m in self.state.config["menus"] if m["id"] == menu_id), {})
+        name = (menu.get("name") or f"Menu {menu_id}").upper()
+        text = self._fit_text(name, rect.width - 32, 72)
+        surface.blit(text, text.get_rect(centerx=rect.centerx, centery=rect.centery - 36))
+        sub = font_small.render(f"MENU {menu_id}", True, pygame.Color(theme["disabled"]))
+        surface.blit(sub, sub.get_rect(centerx=rect.centerx, centery=rect.centery + 14))
+        # Current program as received via MIDI, shown in the rig's
+        # numbering (wire value + program_display_base).
+        program = self.state.current_program
+        if program is not None:
+            program += self.state.config["midi"]["program_display_base"]
+        pgm = font_small.render(
+            f"PGM {'—' if program is None else program}", True,
+            pygame.Color(theme["disabled"]),
+        )
+        surface.blit(pgm, pgm.get_rect(centerx=rect.centerx, centery=rect.centery + 54))
+        if self.state.shift_held:
+            pygame.draw.rect(surface, pygame.Color(theme["text"]), rect, width=4, border_radius=12)
+
+    def _draw_holds(self, pygame, surface, font_big, font_small, holds: dict) -> None:
+        """Redraw just the panels with an arming hold bar on top of the
+        blitted base frame — the only draw work per animation frame."""
+        if self._boot_active(time.monotonic()) or self.state.settings_open:
+            return  # no hold bars on these screens
+        _grid_width, cell_w, cell_h = self._grid_layout(surface)
+        for button_num in holds:
+            rect = self._panel_rect(pygame, button_num, cell_w, cell_h)
+            self._draw_panel(pygame, surface, font_big, font_small, rect,
+                             button_num, holds)
 
     def _tempo_text(self, now: float) -> str:
         bpm = self.state.tempo_bpm
@@ -448,12 +536,12 @@ class UiRenderer:
                 return font.render(text, True, color)
             size = max(16, int(size * 0.85))
 
-    def _draw_hold_bar(self, pygame, surface, rect, button_num) -> None:
+    def _draw_hold_bar(self, pygame, surface, rect, button_num, holds: dict) -> None:
         """Light gray progress fill growing upward from the panel bottom while
         a hold action is arming (buttons with a secondary, and Shift toward
         Menu 4). Drawn right after the panel background so text/status sit on
-        top of it."""
-        started = self.state.hold_started.get(button_num)
+        top of it. `holds` is the loop's snapshot of state.hold_started."""
+        started = holds.get(button_num)
         if started is None:
             return
         fraction = hold_progress(started[0], started[1], time.monotonic())

@@ -9,9 +9,11 @@ import collections
 
 PULSES_PER_BEAT = 24
 RESET_GAP_S = 1.0
-# Averaging window: 2 beats of pulses keeps the readout stable but still
-# tracks tempo changes within a second.
-WINDOW = PULSES_PER_BEAT * 2 + 1
+# Averaging window: 4 beats of pulses. A wider window smooths per-pulse
+# transport jitter (USB/BLE clock arrival isn't perfectly even), which
+# otherwise makes the readout flicker by several BPM; still tracks a real
+# tempo change within ~2 seconds.
+WINDOW = PULSES_PER_BEAT * 4 + 1
 MIN_PULSES = PULSES_PER_BEAT + 1  # one full beat before showing a number
 
 
