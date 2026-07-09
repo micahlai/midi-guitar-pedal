@@ -14,6 +14,7 @@ from web.server import (
     remove_secondary,
     set_primary,
     set_secondary,
+    swap_menus,
     validate_action,
 )
 
@@ -192,6 +193,45 @@ class SlotEditTests(unittest.TestCase):
         remove_secondary(state, 1, 1)
         self.assertIsNone(state.expression_mode)
 
+    def test_swap_menus_swaps_slots_and_names(self):
+        state = make_state()
+        set_primary(state, 1, 3, effect_action(label="ONE", cc_number=41))
+        set_primary(state, 2, 5, effect_action(label="TWO", cc_number=42))
+        state.config["menus"][0]["name"] = "Rhythm"
+        state.config["menus"][1]["name"] = "Lead"
+
+        result = swap_menus(state, 1, 2)
+
+        m1, m2 = state.config["menus"][0], state.config["menus"][1]
+        self.assertEqual(m1["id"], 1)  # ids stay put (physical position)
+        self.assertEqual(m2["id"], 2)
+        self.assertEqual(m1["name"], "Lead")
+        self.assertEqual(m2["name"], "Rhythm")
+        # The button assignments moved with their menu.
+        self.assertNotIn("3", m1["slots"])
+        self.assertEqual(m1["slots"]["5"]["primary"]["label"], "TWO")
+        self.assertEqual(m2["slots"]["3"]["primary"]["label"], "ONE")
+        self.assertIn({"id": 1, "name": "Lead"}, result["menus"])
+
+    def test_swap_menus_clears_affected_expression_mode(self):
+        state = make_state()
+        state.expression_mode = (1, 6, "primary")
+        swap_menus(state, 1, 2)
+        self.assertIsNone(state.expression_mode)
+
+    def test_swap_menus_keeps_unaffected_expression_mode(self):
+        state = make_state()
+        state.expression_mode = (3, 6, "primary")
+        swap_menus(state, 1, 2)
+        self.assertEqual(state.expression_mode, (3, 6, "primary"))
+
+    def test_swap_menus_rejects_self_and_unknown(self):
+        state = make_state()
+        with self.assertRaises(ValueError):
+            swap_menus(state, 1, 1)
+        with self.assertRaises(ValueError):
+            swap_menus(state, 1, 99)
+
     def test_rejects_bad_slot_coordinates(self):
         state = make_state()
         for menu_id, button_num in ((5, 1), ("1", 1), (1, 0), (1, 10), (1, "3")):
@@ -294,6 +334,26 @@ class WebServerHttpTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("cc_number", body["error"])
         self.assertEqual(self.saved, [])
+
+    def test_menu_swap_endpoint_and_undo(self):
+        self._post("/api/slot/primary", {
+            "menu_id": 1, "button_num": 2, "action": effect_action(label="A", cc_number=44),
+        })
+        status, body = self._post("/api/menu/swap", {"menu_id": 1, "other_id": 3})
+        self.assertEqual(status, 200)
+        menus = {m["id"]: m for m in body["config"]["menus"]}
+        self.assertEqual(menus[3]["slots"]["2"]["primary"]["label"], "A")
+        self.assertNotIn("2", menus[1]["slots"])
+        # Swap is undoable like any other mutation.
+        status, body = self._post("/api/undo", {})
+        self.assertEqual(status, 200)
+        menus = {m["id"]: m for m in body["config"]["menus"]}
+        self.assertEqual(menus[1]["slots"]["2"]["primary"]["label"], "A")
+
+    def test_menu_swap_self_is_400(self):
+        status, body = self._post("/api/menu/swap", {"menu_id": 1, "other_id": 1})
+        self.assertEqual(status, 400)
+        self.assertIn("itself", body["error"])
 
 
 if __name__ == "__main__":

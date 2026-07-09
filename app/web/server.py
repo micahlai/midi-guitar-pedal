@@ -16,6 +16,7 @@ API:
 - POST /api/slot/secondary/remove  {menu_id, button_num}
 - POST /api/settings            subset of the editable global settings
 - POST /api/menu                {menu_id, name}
+- POST /api/menu/swap           {menu_id, other_id}  swap two menus' contents
 - POST /api/palette             {colors: [10 x #RRGGBB]}
 - POST /api/preset/save|load|delete|new  {name}
 - POST /api/preset/import       {name, config}
@@ -209,6 +210,27 @@ def set_menu_name(config: dict, menu_id, name) -> dict:
     menu = get_menu(config, menu_id)
     menu["name"] = name.strip()[:MAX_MENU_NAME_LENGTH] or f"Menu {menu_id}"
     return {"menu_id": menu_id, "name": menu["name"]}
+
+
+def swap_menus(state: StateManager, menu_id, other_id) -> dict:
+    """Swap the full contents (name + button assignments) of two menus,
+    keeping each menu's id (physical position). Nothing about the wire
+    behavior changes — the same actions just live under a different menu."""
+    config = state.config
+    for mid in (menu_id, other_id):
+        if not isinstance(mid, int) or get_menu(config, mid) is None:
+            raise ValueError(f"unknown menu {mid!r}")
+    if menu_id == other_id:
+        raise ValueError("cannot swap a menu with itself")
+    a, b = get_menu(config, menu_id), get_menu(config, other_id)
+    a["name"], b["name"] = b["name"], a["name"]
+    a["slots"], b["slots"] = b.get("slots", {}), a.get("slots", {})
+    # The active pot mode is tied to (menu, button, role); its slot just moved,
+    # so deactivate it rather than let ExpressionLogic read a foreign slot.
+    if state.expression_mode and state.expression_mode[0] in (menu_id, other_id):
+        state.expression_mode = None
+    return {"menu_id": menu_id, "other_id": other_id,
+            "menus": [{"id": m["id"], "name": m["name"]} for m in config["menus"]]}
 
 
 MAX_PALETTE_LABEL_LENGTH = 20
@@ -452,6 +474,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/slot/secondary/remove": self.app.edit_remove_secondary,
             "/api/settings": self.app.edit_settings,
             "/api/menu": self.app.edit_menu,
+            "/api/menu/swap": self.app.swap_menu,
             "/api/palette": self.app.edit_palette,
             "/api/preset/save": self.app.preset_save,
             "/api/preset/load": self.app.preset_load,
@@ -545,6 +568,13 @@ class WebServer:
             self.state.config, payload.get("menu_id"), payload.get("name"))})
         log.info("web edit: menu name %s", result["menu"])
         return result
+
+    def swap_menu(self, payload: dict) -> dict:
+        result = self._mutate(lambda: {"swap": swap_menus(
+            self.state, payload.get("menu_id"), payload.get("other_id"))})
+        log.info("web edit: swapped menus %s <-> %s",
+                 payload.get("menu_id"), payload.get("other_id"))
+        return {"config": self.state.config, **result}
 
     def edit_palette(self, payload: dict) -> dict:
         result = self._mutate(lambda: {"palette": set_palette(

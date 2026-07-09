@@ -170,7 +170,10 @@
   .preset-item .name.current { color: var(--accent); }
   .preset-item .date { color: var(--dim); font-size: 12px; }
   .preset-item .spacer { flex: 1; }
-  .menu-name { max-width: 260px; margin-bottom: 12px; }
+  .menu-head { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+  .menu-name { max-width: 260px; }
+  .menu-swap { max-width: 220px; }
+  .menu-head .field { margin-bottom: 0; }
 
   /* ---- images tab ---- */
   .img-tools { display: flex; gap: 32px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -205,9 +208,15 @@
 <main>
   <div id="view-overview" hidden></div>
   <div id="view-menu" hidden>
-    <div class="field menu-name">
-      <label>Menu name (shown on the display)</label>
-      <input type="text" id="menu-name" maxlength="24">
+    <div class="menu-head">
+      <div class="field menu-name">
+        <label>Menu name (shown on the display)</label>
+        <input type="text" id="menu-name" maxlength="24">
+      </div>
+      <div class="field menu-swap">
+        <label>Switch with</label>
+        <select id="menu-swap"></select>
+      </div>
     </div>
     <div class="hint">Click a panel to select it, shift-click to select several —
       a change to one selected button applies to all of them (labels excluded).
@@ -606,6 +615,7 @@ function renderCards() {
       setStatus("saved", "ok");
     } catch (err) { setStatus("menu name: " + err.message, "err"); }
   };
+  renderSwapSelect();
   const wrap = $("cards");
   wrap.innerHTML = "";
   for (let n = 1; n <= 10; n++) {
@@ -621,6 +631,45 @@ function renderCards() {
   refreshSelection();
 }
 
+// "Switch with" dropdown: swaps this menu's full contents (name + all button
+// assignments) with another menu. Nothing about the MIDI behavior changes;
+// the same actions just live under a different menu position.
+function renderSwapSelect() {
+  const sel = $("menu-swap");
+  sel.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choose a menu…";
+  sel.appendChild(placeholder);
+  for (const m of config.menus) {
+    if (m.id === currentMenu) continue;
+    const opt = document.createElement("option");
+    opt.value = String(m.id);
+    opt.textContent = m.name || `Menu ${m.id}`;
+    sel.appendChild(opt);
+  }
+  sel.value = "";
+  sel.onchange = async () => {
+    const other = parseInt(sel.value, 10);
+    if (isNaN(other)) return;
+    const otherName = (menuById(other).name) || `Menu ${other}`;
+    const thisName = menuById(currentMenu).name || `Menu ${currentMenu}`;
+    if (!confirm(`Switch all button assignments between "${thisName}" and "${otherName}"?`)) {
+      sel.value = "";
+      return;
+    }
+    try {
+      const data = await api("/api/menu/swap", { menu_id: currentMenu, other_id: other });
+      selected.clear();
+      configReplaced(data.config);
+      setStatus("menus switched", "ok");
+    } catch (err) {
+      sel.value = "";
+      setStatus("switch: " + err.message, "err");
+    }
+  };
+}
+
 function refreshSelection() {
   for (let n = 1; n <= 9; n++) {
     const card = $("card-" + n);
@@ -632,6 +681,19 @@ function rebuildCard(n) {
   const old = $("card-" + n);
   if (old) old.replaceWith(buildCard(n));
   refreshSelection();
+}
+
+// Recompute the note/program-derived UI (the "Use next available" buttons and
+// duplicate warnings) on every card after a save changed the shared space.
+// Skip whichever card holds focus so we never interrupt active typing.
+function refreshSharedSpaceUI() {
+  if (typeof currentTab !== "number") return;
+  const active = document.activeElement;
+  const activeCard = active && active.closest ? active.closest(".card") : null;
+  for (let m = 1; m <= 9; m++) {
+    const card = $("card-" + m);
+    if (card && card !== activeCard) rebuildCard(m);
+  }
 }
 
 function buildCard(n) {
@@ -988,6 +1050,10 @@ async function post(n, path, payload) {
   try {
     const data = await api(path, payload);
     applySavedSlot(n, data.slot);
+    // The saved slot changed the global note/program space, so every card's
+    // "Use next available" value and duplicate warnings (which read `config`,
+    // now updated) may be stale — refresh them across the whole menu.
+    refreshSharedSpaceUI();
     setStatus("saved", "ok");
   } catch (err) {
     setStatus(`B${n} save failed: ` + err.message, "err");
