@@ -39,7 +39,7 @@ from config import presets
 from config.defaults import copy_device_settings, strip_device_settings
 from config.loader import save_config
 from web import images
-from config.model import ACTION_TYPES, PALETTE_SIZE, get_menu
+from config.model import ACTION_TYPES, PALETTE_SIZE, get_menu, iter_expression_actions
 from state.manager import StateManager
 
 log = logging.getLogger("controller.web")
@@ -152,7 +152,18 @@ def validate_action(raw, allowed_types, secondary: bool, pc_base: int = 0) -> di
         action["reverse"] = _bool(raw.get("reverse"), "reverse")
         action["has_home"] = _bool(raw.get("has_home"), "has_home")
         action["home_value"] = _midi7(raw.get("home_value"), "home_value")
+        # The pot's fallback assignment when no expression button is selected;
+        # at most one across the whole config (enforced on save).
+        action["is_default"] = _bool(raw.get("is_default", False), "is_default")
     return action
+
+
+def _enforce_single_default_expression(config: dict, menu_id, button_num, role) -> None:
+    """Clear is_default on every OTHER expression assignment so only one
+    default (one CC number) exists config-wide."""
+    for mid, num, r, action in iter_expression_actions(config):
+        if (mid, num, r) != (menu_id, button_num, role) and action.get("is_default"):
+            action["is_default"] = False
 
 
 def _get_slot_for_edit(state: StateManager, menu_id, button_num) -> dict:
@@ -179,6 +190,8 @@ def set_primary(state: StateManager, menu_id, button_num, raw_action) -> dict:
                              pc_base=state.config["midi"]["program_display_base"])
     slot = _get_slot_for_edit(state, menu_id, button_num)
     slot["primary"] = action
+    if action.get("is_default"):
+        _enforce_single_default_expression(state.config, menu_id, button_num, "primary")
     _clear_stale_expression_mode(state, menu_id, button_num, "primary", action)
     return slot
 
@@ -191,6 +204,8 @@ def set_secondary(state: StateManager, menu_id, button_num, hold_seconds, raw_ac
     if slot.get("primary") is None:
         raise ValueError("assign a primary action before adding a secondary")
     slot["secondary"] = {"enabled": True, "hold_seconds": hold, "action": action}
+    if action.get("is_default"):
+        _enforce_single_default_expression(state.config, menu_id, button_num, "secondary")
     _clear_stale_expression_mode(state, menu_id, button_num, "secondary", action)
     return slot
 
@@ -456,7 +471,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(200, file.read_bytes(), "image/png")
         elif path == "/api/status":
             state = self.app.state
-            mode = state.expression_mode
+            mode = state.effective_expression_mode()
             self._json(200, {
                 "current_menu": state.current_menu,
                 "current_program": state.current_program,

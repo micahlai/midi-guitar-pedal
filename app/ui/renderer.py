@@ -621,7 +621,7 @@ class UiRenderer:
             base = state.config["midi"]["program_display_base"]
             return state.current_program == action["program_number"] - base
         if kind == "expression_pedal":
-            return state.expression_mode == (state.current_menu, button_num, role)
+            return state.effective_expression_mode() == (state.current_menu, button_num, role)
         return False  # nothing
 
     def _draw_expression(self, pygame, surface, font_small, grid_width, exp_width) -> None:

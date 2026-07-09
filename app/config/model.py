@@ -52,6 +52,27 @@ def get_secondary_action(slot: dict) -> dict | None:
     return None
 
 
+def iter_expression_actions(config: dict):
+    """Yield (menu_id, button_num, role, action) for every expression_pedal
+    assignment across all menus and roles."""
+    for menu in config["menus"]:
+        for button_str, slot in menu.get("slots", {}).items():
+            for role, action in (("primary", slot.get("primary")),
+                                 ("secondary", get_secondary_action(slot))):
+                if action and action.get("type") == "expression_pedal":
+                    yield menu["id"], int(button_str), role, action
+
+
+def find_default_expression(config: dict) -> tuple[int, int, str] | None:
+    """(menu_id, button_num, role) of the expression assignment marked
+    is_default — the pot's fallback mode when no expression button has been
+    selected. The web API enforces at most one."""
+    for menu_id, button_num, role, action in iter_expression_actions(config):
+        if action.get("is_default"):
+            return menu_id, button_num, role
+    return None
+
+
 def iter_effect_cc_actions(config: dict):
     """Yield (menu_id, button_num, action) for every effect_cc assignment —
     used to update effect state from incoming CC feedback."""

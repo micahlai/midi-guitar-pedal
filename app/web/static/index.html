@@ -403,7 +403,8 @@ const TEMPLATES = {
     off_color: "#303030", on_color: "#3399FF", label: "", image_asset_id: null },
   expression_pedal: { type: "expression_pedal", midi_channel: 1, cc_number: 7,
     off_color: "#303030", on_color: "#FFCC00", value_min: 0, value_max: 127,
-    reverse: false, has_home: false, home_value: 0, label: "", image_asset_id: null },
+    reverse: false, has_home: false, home_value: 0, is_default: false,
+    label: "", image_asset_id: null },
   nothing: { type: "nothing", label: "", color: "#1A1A1A" },
 };
 // [key, label, kind]; kind: chan | midi7 | pc | color | bool
@@ -426,6 +427,7 @@ const FIELDS = {
     ["value_min", "Value min", "midi7"], ["value_max", "Value max", "midi7"],
     ["reverse", "Reverse direction", "bool"],
     ["has_home", "Return to home value", "bool"], ["home_value", "Home value", "midi7"],
+    ["is_default", "Default expression (pot uses this when no expression button is selected — only one allowed)", "bool"],
   ],
   nothing: [["color", "Color", "color"]],
 };
@@ -1055,22 +1057,35 @@ async function post(n, path, payload) {
     // now updated) may be stale — refresh them across the whole menu.
     refreshSharedSpaceUI();
     setStatus("saved", "ok");
+    return data;
   } catch (err) {
     setStatus(`B${n} save failed: ` + err.message, "err");
+    return null;
   }
 }
 
-function savePrimary(n) {
-  post(n, "/api/slot/primary",
-    { menu_id: currentMenu, button_num: n, action: edits[n].primary });
+// Setting a default expression clears is_default on every other expression
+// assignment server-side; refetch so the other cards' checkboxes update.
+async function refetchAfterDefault(action, ok) {
+  if (!ok || !action || action.type !== "expression_pedal" || !action.is_default) return;
+  config = await api("/api/config");
+  renderCards();
 }
-function saveSecondary(n) {
+
+async function savePrimary(n) {
+  const action = edits[n].primary;
+  const data = await post(n, "/api/slot/primary",
+    { menu_id: currentMenu, button_num: n, action });
+  await refetchAfterDefault(action, data);
+}
+async function saveSecondary(n) {
   const sec = edits[n].secondary;
   if (!sec) return;
-  post(n, "/api/slot/secondary", {
+  const data = await post(n, "/api/slot/secondary", {
     menu_id: currentMenu, button_num: n,
     hold_seconds: sec.hold_seconds, action: sec.action,
   });
+  await refetchAfterDefault(sec.action, data);
 }
 function removeSecondary(n) {
   post(n, "/api/slot/secondary/remove", { menu_id: currentMenu, button_num: n });

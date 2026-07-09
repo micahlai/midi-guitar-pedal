@@ -1,7 +1,7 @@
 """SPI ADC potentiometer + expression detect pin — hardware only.
 
-ADC chip assumption: MCP3008 (10-bit, SPI mode 0). Swap _read_raw() if the
-actual chip differs (open question in 11_PROJECT_STATE.md).
+ADC chip: MCP3008 (10-bit, SPI mode 0), confirmed wired on SPI0 — pins in
+hardware/constants.py.
 
 A poll thread reads the pot every poll_interval_ms, normalizes to 0.0-1.0
 with light exponential smoothing, and writes state.expression_value. The

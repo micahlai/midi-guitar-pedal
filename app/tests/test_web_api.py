@@ -356,5 +356,57 @@ class WebServerHttpTests(unittest.TestCase):
         self.assertIn("itself", body["error"])
 
 
+class DefaultExpressionTests(unittest.TestCase):
+    """is_default on expression assignments: the pot's fallback mode when no
+    expression button is selected; at most one config-wide."""
+
+    def test_validation_defaults_false_accepts_true_rejects_junk(self):
+        action = validate_action(expression_action(), ("expression_pedal",), secondary=False)
+        self.assertFalse(action["is_default"])
+        action = validate_action(
+            expression_action(is_default=True), ("expression_pedal",), secondary=False)
+        self.assertTrue(action["is_default"])
+        with self.assertRaises(ValueError):
+            validate_action(
+                expression_action(is_default="yes"), ("expression_pedal",), secondary=False)
+
+    def test_only_one_default_config_wide(self):
+        from config.model import find_default_expression, get_primary
+        state = make_state()
+        set_primary(state, 1, 6, expression_action(is_default=True))
+        self.assertEqual(find_default_expression(state.config), (1, 6, "primary"))
+        set_primary(state, 2, 3, expression_action(cc_number=12, is_default=True))
+        self.assertEqual(find_default_expression(state.config), (2, 3, "primary"))
+        self.assertFalse(get_primary(state.config, 1, 6)["is_default"])
+
+    def test_secondary_default_clears_primary_default(self):
+        from config.model import find_default_expression, get_primary
+        state = make_state()
+        set_primary(state, 1, 6, expression_action(is_default=True))
+        set_primary(state, 1, 7, effect_action())
+        set_secondary(state, 1, 7, 1.5, expression_action(cc_number=12, is_default=True))
+        self.assertEqual(find_default_expression(state.config), (1, 7, "secondary"))
+        self.assertFalse(get_primary(state.config, 1, 6)["is_default"])
+
+    def test_pot_falls_back_to_default_when_no_mode_selected(self):
+        state = make_state()
+        set_primary(state, 2, 4, expression_action(is_default=True))
+        state.config_version += 1  # web _mutate does this after every edit
+        self.assertIsNone(state.expression_mode)
+        self.assertEqual(state.effective_expression_mode(), (2, 4, "primary"))
+        self.assertEqual(state.get_expression_action()["cc_number"], 11)
+        # An explicitly selected mode wins over the default.
+        set_primary(state, 1, 5, expression_action(cc_number=22))
+        state.config_version += 1
+        state.expression_mode = (1, 5, "primary")
+        self.assertEqual(state.effective_expression_mode(), (1, 5, "primary"))
+        self.assertEqual(state.get_expression_action()["cc_number"], 22)
+
+    def test_no_default_means_no_fallback(self):
+        state = make_state()
+        self.assertIsNone(state.effective_expression_mode())
+        self.assertIsNone(state.get_expression_action())
+
+
 if __name__ == "__main__":
     unittest.main()

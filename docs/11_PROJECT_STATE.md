@@ -14,7 +14,9 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
 - hostname `guitar-pedal`, user `micah`, key-based SSH (`ssh pedal` alias)
 - 1920x480 HDMI display
 - 10 momentary buttons
-- SPI ADC with potentiometer
+- SPI ADC: MCP3008 confirmed (2026-07-09), wired to SPI0 — MOSI GPIO 10,
+  MISO GPIO 9, SCLK GPIO 11, CS on CE0 (GPIO 8); pot on channel 7
+  (constants.py is the source of truth)
 - momentary power button
 - USB-C
 - Bluetooth MIDI target
@@ -710,6 +712,40 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   shows the UI correct and readable. DISPLAY_ROTATION_DEGREES=90 is the
   right direction for this panel.
 
+### Post-M16 — external ACT LED on GPIO 20 + pin remap (2026-07-09)
+- External LED on GPIO 20 becomes the Pi's onboard ACT LED itself: kernel
+  device-tree remap (`dtparam=act_led_gpio=20` + `act_led_activelow=off`),
+  applied by `scripts/setup-act-led.sh` (run on the Pi, reboot to take
+  effect; onboard LED goes dark — the led node moves, it isn't mirrored).
+  Assumes GPIO 20 -> resistor -> LED -> GND. `GPIO_LED_ACT = 20` recorded
+  in constants; the app must never claim that pin.
+- User pin remaps: power button 6 -> 21, B7 21 -> 6. B3 moved off 20 to
+  PLACEHOLDER GPIO 25 (not wired yet — update constants when wired). All
+  16 GPIO constants verified conflict-free.
+- Script NOT yet run on the Pi (SSH still broken).
+
+### Post-M16 — default expression assignment (2026-07-09, user-directed)
+- Expression actions gained `is_default` (bool): the pot drives that
+  assignment whenever NO expression button is selected
+  (`state.expression_mode is None`). At most ONE default config-wide —
+  saving a default clears the flag on every other expression assignment
+  (`web/server.py _enforce_single_default_expression`, inside the same
+  undo snapshot).
+- `StateManager.effective_expression_mode()` = selected mode or the
+  default (found via `config/model.py find_default_expression`, cached by
+  config_version); `get_expression_action()`, the renderer's expression
+  active-color check, and `/api/status` all use it, so the default slot
+  lights up and the strip shows its assignment with nothing selected.
+  Home-return on switch-away works for the default too (set_mode reads
+  "previous" through the same fallback).
+- Web editor: "Default expression" checkbox in the expression field list
+  (primary and secondary); saving a default refetches the config so other
+  cards' cleared checkboxes update. Old configs need no migration
+  (`.get("is_default")` is falsy when absent).
+- 192 unit tests passing. NOT yet deployed — SSH key auth to the Pi is
+  broken (Pi rejects both Mac keys; needs `ssh-copy-id` with a password
+  first), which also blocks the pending deploys listed below.
+
 ## Current Milestone
 
 All roadmap milestones through 16 complete. Next up: user hardware bring-up
@@ -741,7 +777,6 @@ battery/BMS milestone.
 
 - Exact GPIO pin numbers (draft numbers from hardware spec are in
   `hardware/constants.py`; confirm against actual wiring).
-- Exact SPI ADC chip/model.
 - Exact MIDI library.
 - Exact BLE MIDI implementation path on Raspberry Pi OS Lite.
 - Exact screen mounting/brightness considerations.

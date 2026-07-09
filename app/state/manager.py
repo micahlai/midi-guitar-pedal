@@ -51,6 +51,8 @@ class StateManager:
         self.settings_view = "main"
         self.settings_rows: list[tuple[str, str]] = []
         self.settings_presets: list[str] = []
+        # (config_version, mode) cache for the default expression scan.
+        self._default_expression_cache: tuple[int, tuple | None] = (-1, None)
 
     def boot_log(self, message: str) -> None:
         """Append a startup progress line for the boot screen."""
@@ -73,11 +75,24 @@ class StateManager:
             self.expression_mode = None
         self.config_version += 1
 
+    def effective_expression_mode(self) -> tuple[int, int, str] | None:
+        """The assignment the pot currently drives: the selected mode, or the
+        config's default expression assignment when none is selected."""
+        if self.expression_mode is not None:
+            return self.expression_mode
+        from config.model import find_default_expression
+        version, mode = self._default_expression_cache
+        if version != self.config_version:
+            mode = find_default_expression(self.config)
+            self._default_expression_cache = (self.config_version, mode)
+        return mode
+
     def get_expression_action(self) -> dict | None:
         from config.model import get_secondary_action, get_slot
-        if self.expression_mode is None:
+        mode = self.effective_expression_mode()
+        if mode is None:
             return None
-        menu_id, button_num, role = self.expression_mode
+        menu_id, button_num, role = mode
         slot = get_slot(self.config, menu_id, button_num)
         if slot is None:
             return None
