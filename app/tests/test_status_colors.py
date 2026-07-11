@@ -55,17 +55,22 @@ class SlotStatusColorTests(unittest.TestCase):
         state.pressed_buttons.add(3)
         self.assertEqual(renderer._slot_status_color(slot, 3), "#FF6600")
 
-    def test_secondary_action_cc_uses_secondary_pressed(self):
+    def test_secondary_action_cc_uses_color_duration_window(self):
         renderer, state = make_renderer()
         slot = get_slot(state, 1)
         slot["secondary"]["action"] = {
             "type": "action_cc", "midi_channel": 1, "cc_number": 50,
-            "on_color": "#FF00FF", "label": "STAB",
+            "on_color": "#FF00FF", "label": "STAB", "color_duration": 2.0,
         }
-        # Held past the threshold: secondary fired, still held.
+        # The hold fired at t=10 with a 2 s color window (set by ActionLogic).
+        state.secondary_color_until[(1, 1)] = 12.0
+        with patch("ui.renderer.time.monotonic", return_value=11.0):
+            self.assertEqual(renderer._slot_status_color(slot, 1), "#FF00FF")
+        # Window expired -> back to the primary off color, even if still held.
         state.pressed_buttons.add(1)
         state.secondary_pressed.add(1)
-        self.assertEqual(renderer._slot_status_color(slot, 1), "#FF00FF")
+        with patch("ui.renderer.time.monotonic", return_value=12.5):
+            self.assertEqual(renderer._slot_status_color(slot, 1), "#303030")
 
     def test_expression_active_uses_on_color(self):
         renderer, state = make_renderer()

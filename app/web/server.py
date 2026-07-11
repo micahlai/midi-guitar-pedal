@@ -18,7 +18,8 @@ API:
 - POST /api/menu                {menu_id, name}
 - POST /api/menu/swap           {menu_id, other_id}  swap two menus' contents
 - POST /api/palette             {colors: [10 x #RRGGBB]}
-- POST /api/preset/save|load|delete|new  {name}
+- POST /api/preset/save|load|delete  {name}
+- POST /api/preset/new          {name, blank?} (blank: no button assignments)
 - POST /api/preset/import       {name, config}
 - POST /api/undo, /api/redo     -> {config}
 
@@ -136,6 +137,11 @@ def validate_action(raw, allowed_types, secondary: bool, pc_base: int = 0) -> di
 
     if action_type in ("effect_cc", "action_cc"):
         action["cc_number"] = _midi7(raw.get("cc_number"), "cc_number")
+        if action_type == "action_cc" and secondary:
+            # How long the on_color shows after the hold fires the secondary
+            # (there is no "held" period to display — the fire IS the hold).
+            action["color_duration"] = _seconds(
+                raw.get("color_duration", 1.0), "color_duration", 0.1, 10.0)
     elif action_type == "program_change":
         # Stored in the rig's numbering: wire value + program_display_base.
         number = raw.get("program_number")
@@ -621,10 +627,13 @@ class WebServer:
 
     def preset_new(self, payload: dict) -> dict:
         name = payload.get("name")
+        blank = payload.get("blank", False)
+        if not isinstance(blank, bool):
+            raise ValueError("blank must be true or false")
         result = self._mutate(
-            lambda: self._install(presets.new_preset_config(name))
+            lambda: self._install(presets.new_preset_config(name, blank=blank))
         )
-        log.info("new preset started: %s", name)
+        log.info("new preset started: %s%s", name, " (blank)" if blank else "")
         return result
 
     def preset_import(self, payload: dict) -> dict:

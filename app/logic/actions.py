@@ -48,6 +48,9 @@ class ActionLogic:
             self._on_release(num)
 
     def tick(self, t: float) -> None:
+        for key, until in list(self.state.secondary_color_until.items()):
+            if until <= t:
+                del self.state.secondary_color_until[key]
         for num, pending in list(self._pending.items()):
             hold_s = pending["slot"]["secondary"].get(
                 "hold_seconds", self.config["buttons"]["secondary_hold_default_seconds"]
@@ -58,6 +61,9 @@ class ActionLogic:
                 secondary = get_secondary_action(pending["slot"])
                 log.info("B%d hold: secondary fires", num)
                 self.state.secondary_pressed.add(num)
+                if secondary.get("type") == "action_cc":
+                    self.state.secondary_color_until[(pending["menu"], num)] = (
+                        t + secondary.get("color_duration", 1.0))
                 self._fire(pending["menu"], num, secondary, role="secondary")
 
     def _on_press(self, num: int, t: float) -> None:

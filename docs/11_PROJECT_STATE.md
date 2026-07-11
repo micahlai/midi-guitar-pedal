@@ -712,6 +712,24 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   shows the UI correct and readable. DISPLAY_ROTATION_DEGREES=90 is the
   right direction for this panel.
 
+### Post-M16 — blank presets + secondary action_cc color duration (2026-07-09)
+- Presets tab gained "Start blank preset": `/api/preset/new` accepts
+  `blank: true` -> `new_preset_config(name, blank=True)` = default config
+  with every menu's slots emptied (all buttons unassigned, all
+  preset-scope settings at defaults; device settings overlaid as usual).
+- action_cc SECONDARY actions gained `color_duration` (0.1-10 s, default
+  1.0): how long the on_color shows after the hold fires. Replaces the
+  old held-based display (`secondary_pressed`), which effectively flashed
+  one frame because the fire happens mid-hold and release cleared it.
+  ActionLogic opens `state.secondary_color_until[(menu, num)] = t + dur`
+  on fire (pruned in tick); renderer checks the window (release does NOT
+  close it) and the frame signature includes the active-window set so
+  expiry repaints. `secondary_pressed` still suppresses the primary's
+  pressed color. Web editor shows the field on secondary cards only
+  (kind "secs": float input, step 0.1); server defaults missing values
+  to 1.0 so old configs need no migration.
+- 196 unit tests passing. NOT deployed (SSH to the Pi still broken).
+
 ### Post-M16 — external ACT LED on GPIO 20 + pin remap (2026-07-09)
 - External LED on GPIO 20 becomes the Pi's onboard ACT LED itself: kernel
   device-tree remap (`dtparam=act_led_gpio=20` + `act_led_activelow=off`),

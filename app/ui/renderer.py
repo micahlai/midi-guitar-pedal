@@ -251,6 +251,8 @@ class UiRenderer:
             state.shift_held,
             tuple(sorted(state.pressed_buttons)),
             tuple(sorted(state.secondary_pressed)),
+            # Flips when a secondary on_color window opens or expires.
+            tuple(sorted(k for k, v in state.secondary_color_until.items() if v > now)),
             state.settings_open,
             state.settings_view,
             state.settings_index,
@@ -614,7 +616,10 @@ class UiRenderer:
             return bool(state.effect_states.get((action["midi_channel"], action["cc_number"])))
         if kind == "action_cc":
             if role == "secondary":
-                return button_num in state.secondary_pressed
+                # Hold fires are instantaneous; the on_color shows for the
+                # slot's color_duration window set by ActionLogic.
+                until = state.secondary_color_until.get((state.current_menu, button_num))
+                return until is not None and time.monotonic() < until
             return (button_num in state.pressed_buttons
                     and button_num not in state.secondary_pressed)
         if kind == "program_change":

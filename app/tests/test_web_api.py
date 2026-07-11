@@ -62,6 +62,20 @@ class ValidateActionTests(unittest.TestCase):
         self.assertTrue(action["reverse"])
         self.assertEqual(action["home_value"], 5)
 
+    def test_action_cc_color_duration_secondary_only(self):
+        raw = effect_action(type="action_cc", color_duration=2.5)
+        secondary = validate_action(raw, ("action_cc",), secondary=True)
+        self.assertEqual(secondary["color_duration"], 2.5)
+        primary = validate_action(raw, ("action_cc",), secondary=False)
+        self.assertNotIn("color_duration", primary)
+        # Missing -> default 1.0; out of range -> rejected.
+        secondary = validate_action(
+            effect_action(type="action_cc"), ("action_cc",), secondary=True)
+        self.assertEqual(secondary["color_duration"], 1.0)
+        with self.assertRaises(ValueError):
+            validate_action(effect_action(type="action_cc", color_duration=0),
+                            ("action_cc",), secondary=True)
+
     def test_secondary_drops_image_and_off_color(self):
         action = validate_action(effect_action(), ("effect_cc",), secondary=True)
         self.assertNotIn("image_asset_id", action)

@@ -24,9 +24,13 @@ class StateManager:
         self.expression_mode: tuple[int, int, str] | None = None
         self.shift_held = False
         self.pressed_buttons: set[int] = set()  # physical buttons currently down
-        # Buttons whose SECONDARY action fired and are still held — drives the
-        # secondary on_color for action_cc secondaries.
+        # Buttons whose SECONDARY action fired and are still held — suppresses
+        # the primary's pressed color after a hold fires.
         self.secondary_pressed: set[int] = set()
+        # (menu_id, button_num) -> monotonic deadline: the action_cc secondary
+        # on_color shows until this time (the slot's color_duration after the
+        # hold fires — a hold fire has no natural "held" display period).
+        self.secondary_color_until: dict[tuple[int, int], float] = {}
         # Buttons currently held toward a hold action (secondary, or shift ->
         # Menu 4 as button 10): num -> (pressed_at, hold_seconds). Drives the
         # hold progress bar (Milestone 13.5); cleared when the hold fires or

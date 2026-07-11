@@ -398,7 +398,8 @@ const TEMPLATES = {
   effect_cc: { type: "effect_cc", midi_channel: 1, cc_number: 20,
     off_color: "#303030", on_color: "#00FF66", label: "", image_asset_id: null },
   action_cc: { type: "action_cc", midi_channel: 1, cc_number: 20,
-    off_color: "#303030", on_color: "#FF6600", label: "", image_asset_id: null },
+    off_color: "#303030", on_color: "#FF6600", color_duration: 1,
+    label: "", image_asset_id: null },
   program_change: { type: "program_change", midi_channel: 1, program_number: 0,
     off_color: "#303030", on_color: "#3399FF", label: "", image_asset_id: null },
   expression_pedal: { type: "expression_pedal", midi_channel: 1, cc_number: 7,
@@ -407,7 +408,7 @@ const TEMPLATES = {
     label: "", image_asset_id: null },
   nothing: { type: "nothing", label: "", color: "#1A1A1A" },
 };
-// [key, label, kind]; kind: chan | midi7 | pc | color | bool
+// [key, label, kind]; kind: chan | midi7 | pc | color | bool | secs
 const FIELDS = {
   effect_cc: [
     ["midi_channel", "MIDI channel", "chan"], ["cc_number", "Note number", "midi7"],
@@ -416,6 +417,8 @@ const FIELDS = {
   action_cc: [
     ["midi_channel", "MIDI channel", "chan"], ["cc_number", "Note number", "midi7"],
     ["off_color", "Off color", "color"], ["on_color", "On color", "color"],
+    // Secondary only: how long the on color shows after the hold fires.
+    ["color_duration", "On color duration (seconds)", "secs"],
   ],
   program_change: [
     ["midi_channel", "MIDI channel", "chan"], ["program_number", "Program number", "pc"],
@@ -970,6 +973,7 @@ function actionForm(n, role) {
   pairs.className = "row2";
   for (const [key, name, kind] of FIELDS[action.type]) {
     if (role === "secondary" && key === "off_color") continue;
+    if (role === "primary" && key === "color_duration") continue;
     if (kind === "bool") {
       const div = document.createElement("div");
       div.className = "check";
@@ -990,13 +994,15 @@ function actionForm(n, role) {
     const input = document.createElement("input");
     const base = config.midi.program_display_base;
     input.type = "number";
-    input.min = kind === "chan" ? 1 : kind === "pc" ? base : 0;
-    input.max = kind === "chan" ? 16 : kind === "pc" ? 127 + base : 127;
-    input.value = action[key];
+    input.min = kind === "secs" ? 0.1 : kind === "chan" ? 1 : kind === "pc" ? base : 0;
+    input.max = kind === "secs" ? 10 : kind === "chan" ? 16 : kind === "pc" ? 127 + base : 127;
+    if (kind === "secs") input.step = 0.1;
+    // Pre-color_duration configs lack the field; show the server default.
+    input.value = action[key] ?? (kind === "secs" ? 1 : "");
     // Note/program edits rebuild the card so duplicate warnings refresh.
     const structural = key === "cc_number" || key === "program_number";
     input.onchange = () => {
-      const v = parseInt(input.value, 10);
+      const v = kind === "secs" ? parseFloat(input.value) : parseInt(input.value, 10);
       if (!isNaN(v)) setField(n, role, key, v, structural);
     };
     // Notes are entered as numbers but shown with their name too (C3 = 60).
@@ -1307,6 +1313,17 @@ async function renderPresets() {
                 "(the current preset stays on the device only if you saved it)."))
       presetAction("/api/preset/new", { name }, "new preset started");
   };
+  const blankBtn = document.createElement("button");
+  blankBtn.className = "btn";
+  blankBtn.textContent = "Start blank preset";
+  blankBtn.title = "New preset with every button unassigned and all preset settings reset";
+  blankBtn.onclick = () => {
+    const name = saveAs.querySelector("input").value.trim();
+    if (!name) { setStatus("enter a name for the new preset first", "err"); return; }
+    if (confirm(`Start a blank preset "${name}"? Every button starts unassigned and the controller ` +
+                "switches to it immediately (the current preset stays on the device only if you saved it)."))
+      presetAction("/api/preset/new", { name, blank: true }, "blank preset started");
+  };
   const importLabel = document.createElement("label");
   importLabel.className = "btn";
   importLabel.textContent = "Import JSON…";
@@ -1323,7 +1340,7 @@ async function renderPresets() {
     file.value = "";
   };
   importLabel.appendChild(file);
-  saveAs.append(saveAsBtn, newBtn, importLabel);
+  saveAs.append(saveAsBtn, newBtn, blankBtn, importLabel);
   box.appendChild(saveAs);
 
   const list = document.createElement("div");

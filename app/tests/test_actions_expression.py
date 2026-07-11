@@ -56,6 +56,26 @@ class ActionLogicTest(unittest.TestCase):
         self.logic.on_button_event(1, "release", 2.1)
         self.assertNotIn(1, self.state.secondary_pressed)
 
+    def test_action_cc_secondary_opens_color_window(self):
+        slot = self.config["menus"][0]["slots"]["1"]
+        slot["secondary"]["action"] = {
+            "type": "action_cc", "midi_channel": 1, "cc_number": 50,
+            "on_color": "#FF00FF", "label": "STAB", "color_duration": 2.5,
+        }
+        self.logic.on_button_event(1, "press", 0.0)
+        self.logic.tick(1.5)  # hold threshold -> secondary fires
+        self.assertEqual(self.state.secondary_color_until[(1, 1)], 1.5 + 2.5)
+        self.logic.on_button_event(1, "release", 1.6)
+        # Release does NOT close the window; expiry (pruned in tick) does.
+        self.assertIn((1, 1), self.state.secondary_color_until)
+        self.logic.tick(4.1)
+        self.assertNotIn((1, 1), self.state.secondary_color_until)
+
+    def test_non_action_cc_secondary_opens_no_color_window(self):
+        self.logic.on_button_event(1, "press", 0.0)  # secondary SOLO (PC)
+        self.logic.tick(2.0)
+        self.assertEqual(self.state.secondary_color_until, {})
+
     def test_expression_button_sets_mode_no_midi(self):
         self.logic.on_button_event(6, "press", 0.0)  # VOLUME
         self.assertEqual(self.state.expression_mode, (1, 6, "primary"))

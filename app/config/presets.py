@@ -85,9 +85,13 @@ def delete_preset(name: str) -> None:
     log.info("preset deleted: %s", path)
 
 
-def new_preset_config(name: str) -> dict:
-    """A fresh default config for "start completely new preset"."""
+def new_preset_config(name: str, blank: bool = False) -> dict:
+    """A fresh default config for "start completely new preset". With blank,
+    every button is unassigned (no demo slots) — everything else at defaults."""
     config = default_config()
+    if blank:
+        for menu in config["menus"]:
+            menu["slots"] = {}
     config["preset_name"] = validate_preset_name(name)
     return config
 

@@ -139,6 +139,17 @@ class PresetFilesTest(unittest.TestCase):
         config = presets.new_preset_config("Fresh")
         self.assertEqual(config["preset_name"], "Fresh")
         self.assertEqual(config["version"], default_config()["version"])
+        # Non-blank keeps the demo assignments.
+        self.assertTrue(config["menus"][0]["slots"])
+
+    def test_blank_preset_config_has_no_assignments(self):
+        config = presets.new_preset_config("Blank", blank=True)
+        self.assertEqual(config["preset_name"], "Blank")
+        for menu in config["menus"]:
+            self.assertEqual(menu["slots"], {})
+        # Everything else is at defaults.
+        self.assertEqual(config["version"], default_config()["version"])
+        self.assertEqual(config["ui"], default_config()["ui"])
 
 
 class InstallConfigTest(unittest.TestCase):
