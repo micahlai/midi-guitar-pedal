@@ -8,7 +8,7 @@ Physical layout:
     BOTTOM ROW: B6  B7  B8  B9  B10 (Shift/Menu, not assignable)
 """
 
-GPIO_BUTTON_1 = 3
+GPIO_BUTTON_1 = 18
 GPIO_BUTTON_2 = 4
 GPIO_BUTTON_3 = 17
 GPIO_BUTTON_4 = 27

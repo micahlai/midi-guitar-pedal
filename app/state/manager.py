@@ -55,6 +55,16 @@ class StateManager:
         self.settings_view = "main"
         self.settings_rows: list[tuple[str, str]] = []
         self.settings_presets: list[str] = []
+        # Wi-Fi setup popup (views "wifi" and "wifi_password"): discovered
+        # networks, the popup's own display rows, the network being joined,
+        # the password buffer typed on a plugged-in USB keyboard, and a
+        # status/help line. The main settings_rows stay intact behind the
+        # popup; settings_index navigates the popup while it is open.
+        self.settings_networks: list[dict] = []
+        self.settings_popup_rows: list[tuple[str, str]] = []
+        self.settings_wifi_ssid = ""
+        self.settings_password = ""
+        self.settings_wifi_status = ""
         # (config_version, mode) cache for the default expression scan.
         self._default_expression_cache: tuple[int, tuple | None] = (-1, None)
 

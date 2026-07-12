@@ -62,8 +62,12 @@ def hold_progress(pressed_at: float, hold_seconds: float, now: float) -> float:
 
 
 class UiRenderer:
-    def __init__(self, state: StateManager):
+    def __init__(self, state: StateManager, on_key=None):
         self.state = state
+        # Called with (key, unicode_char) for every KEYDOWN from a plugged-in
+        # USB keyboard (SDL reads evdev on KMSDRM) — drives Wi-Fi password
+        # entry in the settings menu via the main event queue.
+        self.on_key = on_key
         self._thread: threading.Thread | None = None
         self._running = False
         self.screenshot_requested = False
@@ -188,7 +192,9 @@ class UiRenderer:
         base = pygame.Surface(canvas.get_size())
         last_signature = object()
         while self._running:
-            pygame.event.pump()
+            for event in pygame.event.get():
+                if event.type == pygame.KEYDOWN and self.on_key is not None:
+                    self.on_key((event.key, event.unicode))
             holds = dict(self.state.hold_started)
             signature = self._frame_signature(time.monotonic())
             base_dirty = signature != last_signature
@@ -257,6 +263,10 @@ class UiRenderer:
             state.settings_view,
             state.settings_index,
             tuple(state.settings_rows),
+            tuple(state.settings_popup_rows),
+            state.settings_wifi_ssid,
+            state.settings_password,
+            state.settings_wifi_status,
             self._tempo_text(now),
             int(now / (FLICKER_PERIOD_S / 2)),
         )
@@ -678,7 +688,12 @@ class UiRenderer:
 
     def _draw_settings(self, pygame, surface, font_big, font_small) -> None:
         theme = self.theme
-        in_presets = self.state.settings_view == "presets"
+        view = self.state.settings_view
+        in_presets = view == "presets"
+        # Wi-Fi views draw as a popup window over the main settings rows;
+        # while one is open, settings_index navigates the popup, so the
+        # rows behind are drawn without a selection.
+        popup = view in ("wifi", "wifi_password")
         title = font_big.render("PRESETS" if in_presets else "SETTINGS",
                                 True, pygame.Color(theme["text"]))
         surface.blit(title, (40, 24))
@@ -687,26 +702,104 @@ class UiRenderer:
         # scrolled so the selected row stays visible (preset lists can be
         # longer than the screen).
         rows = self.state.settings_rows or [("…", "")]
-        index = min(self.state.settings_index, len(rows) - 1)
+        index = None if popup else min(self.state.settings_index, len(rows) - 1)
         item_top, item_h, list_width = 100, 46, 1300
         max_visible = max((surface.get_height() - item_top - 10) // item_h, 1)
-        first = max(0, index - max_visible + 1)
-        for i, (label, value) in enumerate(rows[first:first + max_visible]):
-            selected = first + i == index
-            y = item_top + i * item_h
-            if selected:
-                row = pygame.Rect(32, y - 6, list_width, item_h)
-                pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), row, border_radius=8)
-            color = pygame.Color(theme["text"] if selected else theme["disabled"])
-            text = font_small.render(("> " if selected else "  ") + label, True, color)
-            surface.blit(text, (48, y))
-            if value:
-                val = font_small.render(str(value), True, color)
-                surface.blit(val, val.get_rect(right=32 + list_width - 24, top=y))
+        first = 0 if index is None else max(0, index - max_visible + 1)
+        self._draw_settings_rows(pygame, surface, font_small,
+                                 rows[first:first + max_visible],
+                                 None if index is None else index - first,
+                                 32, item_top, list_width, item_h)
 
         # Footswitch legend, right side (B6/B7/B9/B10 per logic/settings.py).
         legend = ["B6  up", "B7  down", "B9  select",
-                  "B10 back" if in_presets else "B10 exit"]
+                  "B10 back" if in_presets or popup else "B10 exit"]
         for i, line in enumerate(legend):
             text = font_small.render(line, True, pygame.Color(theme["text"]))
             surface.blit(text, (surface.get_width() - 360, 110 + i * 52))
+
+        if view == "wifi":
+            self._draw_wifi_popup(pygame, surface, font_small)
+        elif view == "wifi_password":
+            self._draw_password_popup(pygame, surface, font_small)
+
+    def _draw_settings_rows(self, pygame, surface, font_small, rows,
+                            selected_index, left, top, width, item_h) -> None:
+        """(label, value) rows with the shared selection/two-column style;
+        selected_index is relative to `rows` (None = no selection)."""
+        theme = self.theme
+        for i, (label, value) in enumerate(rows):
+            selected = i == selected_index
+            y = top + i * item_h
+            if selected:
+                row = pygame.Rect(left, y - 6, width, item_h)
+                pygame.draw.rect(surface, pygame.Color(theme["panel_background"]),
+                                 row, border_radius=8)
+            color = pygame.Color(theme["text"] if selected else theme["disabled"])
+            text = font_small.render(("> " if selected else "  ") + label, True, color)
+            surface.blit(text, (left + 16, y))
+            if value:
+                val = font_small.render(str(value), True, color)
+                surface.blit(val, val.get_rect(right=left + width - 24, top=y))
+
+    def _popup_frame(self, pygame, surface, size) -> object:
+        """Centered popup window: background fill + border; returns its Rect."""
+        theme = self.theme
+        rect = pygame.Rect(0, 0, *size)
+        rect.center = (surface.get_width() // 2, surface.get_height() // 2)
+        pygame.draw.rect(surface, pygame.Color(theme["background"]), rect,
+                         border_radius=16)
+        pygame.draw.rect(surface, pygame.Color(theme["text"]), rect, width=3,
+                         border_radius=16)
+        return rect
+
+    def _draw_wifi_popup(self, pygame, surface, font_small) -> None:
+        """Discovered-network list (SettingsLogic view "wifi"): popup rows
+        scrolled around the selection, status/help line at the bottom."""
+        theme = self.theme
+        rect = self._popup_frame(pygame, surface, (1200, 420))
+        title = font_small.render("WI-FI NETWORKS", True, pygame.Color(theme["text"]))
+        surface.blit(title, (rect.left + 32, rect.top + 20))
+
+        rows = self.state.settings_popup_rows or [("…", "")]
+        index = min(self.state.settings_index, len(rows) - 1)
+        item_top, item_h, status_h = rect.top + 70, 44, 48
+        max_visible = max((rect.height - 70 - status_h) // item_h, 1)
+        first = max(0, index - max_visible + 1)
+        self._draw_settings_rows(pygame, surface, font_small,
+                                 rows[first:first + max_visible], index - first,
+                                 rect.left + 16, item_top, rect.width - 32, item_h)
+
+        status = self.state.settings_wifi_status
+        if status:
+            text = font_small.render(status, True, pygame.Color(theme["text"]))
+            surface.blit(text, (rect.left + 32, rect.bottom - status_h + 4))
+
+    def _draw_password_popup(self, pygame, surface, font_small) -> None:
+        """Password entry for a secured network, typed on a USB keyboard
+        plugged into the Pi (SettingsLogic view "wifi_password")."""
+        theme = self.theme
+        rect = self._popup_frame(pygame, surface, (1100, 320))
+        title = self._fit_text(f"JOIN {self.state.settings_wifi_ssid}",
+                               rect.width - 64, 36)
+        surface.blit(title, (rect.left + 32, rect.top + 24))
+
+        box = pygame.Rect(rect.left + 32, rect.top + 84, rect.width - 64, 60)
+        pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), box,
+                         border_radius=8)
+        # Show the tail of the password when it outgrows the box.
+        shown = self.state.settings_password
+        text = font_small.render(shown + "_", True, pygame.Color(theme["text"]))
+        while shown and text.get_width() > box.width - 32:
+            shown = shown[1:]
+            text = font_small.render(shown + "_", True, pygame.Color(theme["text"]))
+        surface.blit(text, text.get_rect(left=box.left + 16, centery=box.centery))
+
+        hint = font_small.render(
+            "Type on a USB keyboard  ·  Enter = connect  ·  Esc = back",
+            True, pygame.Color(theme["disabled"]))
+        surface.blit(hint, (rect.left + 32, box.bottom + 24))
+        status = self.state.settings_wifi_status
+        if status:
+            text = font_small.render(status, True, pygame.Color(theme["text"]))
+            surface.blit(text, (rect.left + 32, rect.bottom - 52))

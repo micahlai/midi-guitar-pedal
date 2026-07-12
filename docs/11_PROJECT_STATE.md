@@ -764,6 +764,47 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   broken (Pi rejects both Mac keys; needs `ssh-copy-id` with a password
   first), which also blocks the pending deploys listed below.
 
+### Post-M16 — Wi-Fi setup from the device settings menu (2026-07-11)
+- Selecting the Wi-Fi row in the on-device settings menu now opens a
+  NETWORK LIST POPUP (view "wifi"): discovered networks sorted strongest
+  first (active one leads, "connected"/"61% · open"/"47% · secured"
+  values), plus Rescan and Back rows. B6/B7/B9/B10 navigate as usual;
+  the main settings rows stay drawn (unselected) behind the popup.
+- Choosing a secured network opens a PASSWORD POPUP (view
+  "wifi_password") typed on a USB keyboard plugged into the Pi: Enter =
+  connect, Esc = back, Backspace edits, printable chars append (63-char
+  WPA limit); B9/B10 mirror Enter/Esc. Open networks connect directly.
+  Success returns to the main view with a forced status refresh (new
+  SSID/IP rows); failure shows a short message ("Wrong password", …)
+  and stays for a retry.
+- Keyboard plumbing: the render thread now drains pygame events
+  (was pump()) and forwards KEYDOWN as (key, unicode) via UiRenderer's
+  new on_key callback -> main queue ("key", payload) -> SettingsLogic
+  .handle_key when the settings menu is open; ignored otherwise.
+- `hardware/sysinfo.py`: `wifi_scan()` / `wifi_connect()` via nmcli
+  (NetworkManager is Raspbian's default since bookworm) — terse-output
+  parser handles escaped colons in SSIDs, merges duplicate BSSIDs, skips
+  hidden SSIDs; connect deletes a same-name saved profile first (old
+  secrets would win) and cleans up the failed profile after (it would
+  auto-retry and shadow the next attempt); rc/stderr mapping to short
+  messages. New `_run_result()` returns (rc, stdout, stderr); `_run` is
+  now a thin wrapper. Scan/connect run on SettingsLogic worker threads
+  (connect blocks up to ~60 s).
+- State additions: settings_networks, settings_popup_rows,
+  settings_wifi_ssid, settings_password, settings_wifi_status; renderer
+  frame signature includes them. Popup drawing shares a
+  `_draw_settings_rows` helper with the main list.
+- Verified headlessly (SDL dummy, scratch venv): screenshots of the
+  network-list popup (selection, values, legend "B10 back") and the
+  password popup (typed text + cursor, hint, "Wrong password" status).
+- 216 unit tests passing (20 new: popup flows, key handling, nmcli
+  parsing/connect mapping with a stubbed _run_result).
+- NOT yet verified on the Pi: deploy + real nmcli scan/join, and that
+  SDL on KMSDRM delivers keyboard events to the service — the `micah`
+  user may need to be in the `input` group for /dev/input access
+  (`sudo usermod -aG input micah`, then restart the service) if keys
+  don't arrive.
+
 ## Current Milestone
 
 All roadmap milestones through 16 complete. Next up: user hardware bring-up
@@ -817,7 +858,9 @@ battery/BMS milestone.
    hardware (Milestone 5) bench verification; hold-bar UI (13.5), settings
    menu navigation (15) and power-hold shutdown (16) get their first real
    exercise then.
-3. Deploy pending (Pi was off): post-M16 Settings tab (preset/device scopes).
-   Also still unverified in a real browser: post-M14 palette labels/popover
-   and the new Settings tab click-through.
+3. Deploy pending (Pi was off): post-M16 Settings tab (preset/device scopes)
+   and the Wi-Fi setup popup (scan/join via nmcli + USB keyboard password
+   entry — check the service user can read /dev/input, see the Wi-Fi setup
+   section). Also still unverified in a real browser: post-M14 palette
+   labels/popover and the new Settings tab click-through.
 4. Future milestone: battery/BMS (hardware/battery.py read() is the hook).

@@ -55,10 +55,11 @@ def main() -> int:
 
     state = StateManager(config)
     state.boot_log(f"config loaded — preset {config.get('preset_name') or '—'}")
-    # The queue carries ("button", (num, kind, t)) and ("midi", message).
+    # The queue carries ("button", (num, kind, t)), ("midi", message) and
+    # ("key", (key, char)) from a USB keyboard (Wi-Fi password entry).
     events: queue.Queue = queue.Queue()
     midi = MidiEngine(state, config, on_message=lambda msg: events.put(("midi", msg)))
-    ui = UiRenderer(state)
+    ui = UiRenderer(state, on_key=lambda payload: events.put(("key", payload)))
     web = WebServer(state)
 
     ui.start()
@@ -116,6 +117,9 @@ def main() -> int:
                 source, payload = event
                 if source == "midi":
                     midi_in_logic.handle_message(payload)
+                elif source == "key":
+                    if state.settings_open:
+                        settings_logic.handle_key(payload)
                 elif payload[0] == BUTTON_NUM_POWER:
                     power_logic.handle_event(payload)
                 elif state.settings_open:
