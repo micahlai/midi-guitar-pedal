@@ -37,18 +37,13 @@ KEY_DELETE = 8
 KEY_LEFT = 9
 KEY_RIGHT = 10
 
-# Short labels for the on-screen legend, in display order.
-LEGEND = (
-    (1, "0-9"),
-    (2, "a b c d e f g"),
-    (3, "h i j k l m n"),
-    (4, "o p q r s t u"),
-    (5, "v w x y z"),
-    (6, ". , - _ @ # …"),
-    (KEY_SHIFT, "SHIFT"),
-    (KEY_DELETE, "DELETE"),
-    (KEY_LEFT, "◀ left"),
-    (KEY_RIGHT, "right ▶"),
+# On-screen legend, laid out as the pedal physically is: B1-B5 across the top
+# row, B6-B10 across the bottom. Drawn as a 2x5 grid so a glance at the screen
+# maps straight onto the switch under your foot.
+LEGEND_ROWS = (
+    ((1, "0-9"), (2, "abcdefg"), (3, "hijklmn"), (4, "opqrstu"), (5, "vwxyz")),
+    ((6, ". , - _ @ #"), (KEY_SHIFT, "SHIFT"), (KEY_DELETE, "DELETE"),
+     (KEY_LEFT, "◀"), (KEY_RIGHT, "▶")),
 )
 
 

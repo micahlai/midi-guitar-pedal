@@ -23,6 +23,7 @@ from logic.midi_in import MidiInLogic
 from logic.power import PowerLogic
 from logic.hotspot import HotspotLogic
 from logic.settings import SettingsLogic
+from logic.status import StatusLogic
 from midi.engine import MidiEngine
 from state.manager import StateManager
 from ui.renderer import UiRenderer
@@ -91,6 +92,7 @@ def main() -> int:
     power_logic = PowerLogic(config, state, on_shutdown=shutdown_machine)
     settings_logic = SettingsLogic(state, midi=midi)
     hotspot_logic = HotspotLogic(state)
+    status_logic = StatusLogic(state, midi=midi)
     midi_in_logic = MidiInLogic(config, state)
 
     running = True
@@ -130,8 +132,8 @@ def main() -> int:
                     # While typing a Wi-Fi password every footswitch is a
                     # character, so POWER is the confirm key (and hold-to-
                     # shutdown is suppressed — no shutting down mid-password).
-                    if (state.settings_open
-                            and state.settings_view == "wifi_password"):
+                    if (state.settings_open and state.settings_view
+                            in ("wifi_password", "hotspot_password")):
                         settings_logic.handle_event(payload)
                     else:
                         power_logic.handle_event(payload)
@@ -144,6 +146,7 @@ def main() -> int:
             power_logic.tick(now)
             settings_logic.tick(now)
             hotspot_logic.tick(now)
+            status_logic.tick(now)
             action_logic.tick(now)
             expression_logic.tick(now)
             midi.tick(now)

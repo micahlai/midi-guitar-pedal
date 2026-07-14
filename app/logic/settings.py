@@ -30,6 +30,7 @@ from config.defaults import copy_device_settings
 from config.loader import save_config
 from hardware import sysinfo
 from hardware.constants import BUTTON_NUM_POWER
+from logic import header
 from logic.keypad import KEY_DELETE, MultiTapKeypad
 
 log = logging.getLogger("controller.logic.settings")
@@ -51,8 +52,10 @@ REFRESH_SECONDS = 2.0
 
 # Main-view items, in display order. Info rows refresh on select; pairing
 # toggles; preset opens the preset list view; exit closes the menu.
-MAIN_ITEMS = ("wifi", "hotspot", "bluetooth", "usb", "network", "pairing",
-              "preset", "exit")
+MAIN_ITEMS = ("wifi", "hotspot", "hotspot_key", "header", "bluetooth",
+              "usb", "network", "pairing", "preset", "exit")
+
+WPA_MIN_CHARS = 8  # WPA2 refuses anything shorter
 
 
 class SettingsLogic:
@@ -81,8 +84,11 @@ class SettingsLogic:
         num, kind, t = event
         if kind != "press":
             return
-        if self.state.settings_view == "wifi_password":
+        if self.state.settings_view in ("wifi_password", "hotspot_password"):
             self._handle_password_button(num, t)
+            return
+        if self.state.settings_view == "header":
+            self._handle_header_button(num)
             return
         rows = len(self._nav_rows()) or 1
         if num == BUTTON_UP:
@@ -103,11 +109,18 @@ class SettingsLogic:
         a character there is no spare one to cancel with."""
         if self._connecting:
             return
+        editing_hotspot = self.state.settings_view == "hotspot_password"
         if num == BUTTON_NUM_POWER:
-            self._submit_password()
+            if editing_hotspot:
+                self._save_hotspot_password()
+            else:
+                self._submit_password()
             return
         if num == KEY_DELETE and not self.keypad.text:
-            self._show_wifi(rescan=False)
+            if editing_hotspot:
+                self._show_main(select="hotspot_key")
+            else:
+                self._show_wifi(rescan=False)
             return
         self.keypad.press(num, now)
         self._sync_password()
@@ -127,15 +140,23 @@ class SettingsLogic:
         supported when the port is in host mode; the keypad above is what
         makes the popup usable when it is not."""
         key, char = payload
-        if self.state.settings_view != "wifi_password" or self._connecting:
+        view = self.state.settings_view
+        if view not in ("wifi_password", "hotspot_password") or self._connecting:
             return
+        editing_hotspot = view == "hotspot_password"
         if key in (KEY_RETURN, KEY_KP_ENTER):
-            self._submit_password()
+            if editing_hotspot:
+                self._save_hotspot_password()
+            else:
+                self._submit_password()
         elif key == KEY_BACKSPACE:
             self.keypad.press(KEY_DELETE, 0.0)
             self._sync_password()
         elif key == KEY_ESCAPE:
-            self._show_wifi(rescan=False)
+            if editing_hotspot:
+                self._show_main(select="hotspot_key")
+            else:
+                self._show_wifi(rescan=False)
         elif char and len(char) == 1 and char.isprintable():
             self.keypad.insert(char)
             self._sync_password()
@@ -189,6 +210,10 @@ class SettingsLogic:
             self._toggle_pairing()
         elif item == "hotspot":
             self._toggle_hotspot()
+        elif item == "hotspot_key":
+            self._edit_hotspot_password()
+        elif item == "header":
+            self._show_header()
         elif item == "preset":
             self._show_presets()
         elif item == "wifi":
@@ -237,6 +262,83 @@ class SettingsLogic:
             self.state.settings_wifi_status = message
             self._build_rows()
 
+    # --- top display popup ----------------------------------------------------
+
+    def _show_header(self) -> None:
+        self.state.settings_view = "header"
+        self.state.settings_index = 0
+        self.state.settings_wifi_status = ""
+        self._build_header_rows()
+
+    def _handle_header_button(self, num: int) -> None:
+        """B6/B7 pick an item, B1-B5 place it in that position (the switches
+        sit in the same left-to-right order as the header slots), B10 done."""
+        rows = len(header.HEADER_ITEMS)
+        if num == BUTTON_UP:
+            self.state.settings_index = (self.state.settings_index - 1) % rows
+        elif num == BUTTON_DOWN:
+            self.state.settings_index = (self.state.settings_index + 1) % rows
+        elif num == BUTTON_EXIT:
+            self._show_main(select="header")
+        elif 1 <= num <= header.SLOT_COUNT:
+            self._place_top_item(num - 1)
+
+    def _place_top_item(self, position: int) -> None:
+        item = header.HEADER_ITEMS[
+            min(self.state.settings_index, len(header.HEADER_ITEMS) - 1)][0]
+        slots = self.state.config["ui"].get("header")
+        # Selecting the position an item already holds toggles it back off, so
+        # there is a way to show nothing at all without a separate "clear" key.
+        if header.position_of(slots, item) == position:
+            updated = header.clear(slots, item)
+        else:
+            updated = header.assign(slots, item, position)
+        self.state.config["ui"]["header"] = updated
+        self.save(self.state.config)
+        self._build_header_rows()
+
+    def _build_header_rows(self) -> None:
+        slots = header.normalize(self.state.config["ui"].get("header"))
+        rows = []
+        for key, label in header.HEADER_ITEMS:
+            position = slots.index(key) if key in slots else None
+            rows.append((label, header.POSITION_NAMES[position]
+                         if position is not None else "—"))
+        self.state.settings_popup_rows = rows
+
+    def _header_summary(self) -> str:
+        """Just how many positions are filled — the row is a doorway, and the
+        popup behind it is where the actual layout is shown."""
+        slots = header.normalize(self.state.config["ui"].get("header"))
+        return f"{sum(item is not None for item in slots)} set"
+
+    def _edit_hotspot_password(self) -> None:
+        """Same footswitch keypad as the Wi-Fi popup, prefilled with the
+        current key so it can be edited rather than retyped from scratch."""
+        self.state.settings_view = "hotspot_password"
+        self.state.settings_wifi_status = ""
+        self.keypad.reset()
+        for character in self.state.config.get("hotspot", {}).get("password", ""):
+            self.keypad.insert(character)
+        self._sync_password()
+
+    def _save_hotspot_password(self) -> None:
+        password = self.keypad.text
+        if len(password) < WPA_MIN_CHARS:
+            self.state.settings_wifi_status = (
+                f"Need {WPA_MIN_CHARS}+ characters")
+            return
+        self.state.config.setdefault("hotspot", {})["password"] = password
+        self.save(self.state.config)
+        log.info("hotspot password updated (%d chars)", len(password))
+        # Changing the key does not re-key a hotspot that is already up: the
+        # laptop joined with the OLD one, and yanking it mid-edit would strand
+        # whoever is using the editor to make this very change.
+        hosting = self._info.get("ap", False)
+        self._show_main(select="hotspot_key")
+        self.state.settings_wifi_status = (
+            "Saved — restart hotspot to apply" if hosting else "Saved")
+
     def _show_presets(self) -> None:
         self.state.settings_presets = [p["name"] for p in self.presets.list_presets()]
         self.state.settings_view = "presets"
@@ -248,7 +350,14 @@ class SettingsLogic:
     def _show_main(self, select: str | None = None) -> None:
         previous = self.state.settings_view
         if select is None:
-            select = "wifi" if previous in ("wifi", "wifi_password") else "preset"
+            if previous == "header":
+                select = "header"
+            elif previous == "hotspot_password":
+                select = "hotspot_key"
+            elif previous in ("wifi", "wifi_password"):
+                select = "wifi"
+            else:
+                select = "preset"
         self.state.settings_view = "main"
         self.state.settings_index = MAIN_ITEMS.index(select)
         self._build_rows()
@@ -455,6 +564,11 @@ class SettingsLogic:
         self.state.settings_rows = [
             ("Wi-Fi", wifi),
             ("Hotspot", hotspot),
+            # Shown in the clear on purpose: you have to read it off the pedal
+            # to type it into the laptop that is joining.
+            ("Hotspot password",
+             self.state.config.get("hotspot", {}).get("password", "")),
+            ("Header", self._header_summary()),
             ("Bluetooth MIDI", ble),
             ("USB MIDI", usb),
             ("IP / hostname", network),

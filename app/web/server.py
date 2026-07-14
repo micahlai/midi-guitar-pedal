@@ -39,6 +39,7 @@ from pathlib import Path
 from config import presets
 from config.defaults import copy_device_settings, strip_device_settings
 from config.loader import save_config
+from logic import header
 from web import images
 from config.model import ACTION_TYPES, PALETTE_SIZE, get_menu, iter_expression_actions
 from state.manager import StateManager
@@ -100,6 +101,27 @@ def _string(value, name, max_len):
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
     return value.strip()[:max_len]
+
+
+def _header_slots(value):
+    """The header's 5 positions (logic/header.py). Enforced here, not just in
+    the browser: one item per position, one position per item, so an API caller
+    cannot write a config the on-device menu could never produce."""
+    if not isinstance(value, list) or len(value) != header.SLOT_COUNT:
+        raise ValueError(f"header must be a list of {header.SLOT_COUNT} items")
+    seen = set()
+    slots = []
+    for item in value:
+        if item is None:
+            slots.append(None)
+            continue
+        if item not in header.ITEM_KEYS:
+            raise ValueError(f"unknown header item: {item!r}")
+        if item in seen:
+            raise ValueError(f"header item appears twice: {item!r}")
+        seen.add(item)
+        slots.append(item)
+    return slots
 
 
 def validate_action(raw, allowed_types, secondary: bool, pc_base: int = 0) -> dict:
@@ -378,9 +400,9 @@ def apply_settings(config: dict, payload: dict) -> dict:
             config["buttons"], "power_hold_seconds",
             _seconds(payload["power_hold_seconds"], "power_hold_seconds", 0.5, 10.0),
         )
-    if "show_tempo" in payload:
-        updates["show_tempo"] = (
-            config["ui"], "show_tempo", _bool(payload["show_tempo"], "show_tempo"),
+    if "header" in payload:
+        updates["header"] = (
+            config["ui"], "header", _header_slots(payload["header"]),
         )
     if "detect_enabled" in payload:
         updates["detect_enabled"] = (

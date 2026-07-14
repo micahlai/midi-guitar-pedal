@@ -30,7 +30,7 @@ def load_config() -> dict:
         config = json.load(f)
 
     if prepare_config(config):
-        log.info("migrated action colors to off_color/on_color model")
+        log.info("config migrated to the current schema")
         save_config(config)
     return config
 
@@ -45,8 +45,33 @@ def prepare_config(config: dict) -> bool:
             f"config version {config.get('version') if isinstance(config, dict) else None!r} "
             f"unsupported (expected {CONFIG_VERSION})"
         )
+    migrated = _migrate_header(config)
     _fill_missing(config, default_config())
-    return _normalize_colors(config)
+    return _normalize_colors(config) or migrated
+
+
+def _migrate_header(config: dict) -> bool:
+    """ui.top_display -> ui.header, and drop the retired ui.show_tempo.
+
+    Runs BEFORE _fill_missing, or the back-fill would hand the config a
+    default header and the user's saved layout would silently vanish. The BPM
+    slot in the header is the tempo toggle now, so a config that had tempo
+    switched off keeps it off by starting with no BPM item.
+    """
+    ui = config.get("ui")
+    if not isinstance(ui, dict):
+        return False
+    changed = False
+    if "header" not in ui and "top_display" in ui:
+        ui["header"] = ui.pop("top_display")
+        changed = True
+    if "show_tempo" in ui:
+        if ui.pop("show_tempo") is False:
+            slots = ui.get("header")
+            if isinstance(slots, list):
+                ui["header"] = [None if item == "bpm" else item for item in slots]
+        changed = True
+    return changed
 
 
 # Pre-2026-07-06 configs used per-type color field names; the current model

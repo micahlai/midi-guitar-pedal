@@ -151,6 +151,13 @@ class BleMidiServer:
         self._thread: threading.Thread | None = None
         self._started_at = time.monotonic()
         self._legacy_instance: int | None = None  # btmgmt fallback ad instance
+        self._dbus = None
+        self._bus = None
+        self._adapter_path = None
+        self._app_path = None
+        self._ad_path = None
+        self._gatt = None
+        self._ads = None
 
     # --- lifecycle (called from the main thread) ---------------------------
 
@@ -171,6 +178,17 @@ class BleMidiServer:
             if adapter_path is None:
                 log.error("no Bluetooth adapter with GATT support found")
                 return False
+            self._dbus = dbus
+            self._bus = bus
+            self._adapter_path = adapter_path
+            # A previous run may have died without stop() — SIGKILL, or the
+            # power yanked mid-set. Its btmgmt advertising instance lives in
+            # the kernel and its central may still be linked, both outliving
+            # the process that owned the (now gone) GATT app. Clear both before
+            # we register, or a host connects to the leftover peripheral and
+            # finds no MIDI service.
+            self._disconnect_centrals()
+            self._btmgmt("rm-adv", "1")
 
             adapter_props = dbus.Interface(bus.get_object(BLUEZ, adapter_path), PROPS_IFACE)
             adapter_props.Set(ADAPTER, "Powered", dbus.Boolean(True))
@@ -190,17 +208,28 @@ class BleMidiServer:
             app = App(bus, service)
             ad = Ad(bus, self.device_name)
 
-            gatt = dbus.Interface(bus.get_object(BLUEZ, adapter_path), GATT_MANAGER)
-            gatt.RegisterApplication(
+            self._app_path = app.path
+            self._ad_path = ad.path
+            self._gatt = dbus.Interface(bus.get_object(BLUEZ, adapter_path), GATT_MANAGER)
+            self._ads = dbus.Interface(bus.get_object(BLUEZ, adapter_path), AD_MANAGER)
+
+            def gatt_registered():
+                # Advertise only once the GATT app is actually served. A pedal
+                # that advertises the MIDI service UUID with no MIDI service
+                # behind it is what wedges CoreMIDI on macOS ("the MIDI server
+                # can't be opened") — the host connects, finds nothing, and
+                # keeps a broken driver object around.
+                log.info("BLE MIDI GATT service registered")
+                self._ads.RegisterAdvertisement(
+                    ad.path, {},
+                    reply_handler=lambda: log.info(
+                        "BLE MIDI advertising as %r", self.device_name),
+                    error_handler=self._advertising_failed)
+
+            self._gatt.RegisterApplication(
                 app.path, {},
-                reply_handler=lambda: log.info("BLE MIDI GATT service registered"),
+                reply_handler=gatt_registered,
                 error_handler=lambda e: log.error("GATT registration failed: %s", e))
-            ads = dbus.Interface(bus.get_object(BLUEZ, adapter_path), AD_MANAGER)
-            ads.RegisterAdvertisement(
-                ad.path, {},
-                reply_handler=lambda: log.info(
-                    "BLE MIDI advertising as %r", self.device_name),
-                error_handler=self._advertising_failed)
         except Exception as e:
             log.error("BLE MIDI setup failed: %s", e)
             return False
@@ -211,15 +240,77 @@ class BleMidiServer:
         return True
 
     def stop(self) -> None:
+        """Tear the peripheral down in the order a host expects.
+
+        macOS keeps a CoreMIDI driver object alive for a connected BLE-MIDI
+        peripheral. Exiting without this teardown leaves the Mac's link to die
+        by supervision timeout, and — worse — the btmgmt advertising instance
+        lives in the kernel, not in this process, so it survives a service
+        restart and keeps the pedal visible with the MIDI service UUID while
+        the GATT app is gone. Connecting to that half-dead peripheral is what
+        makes MIDIServer fail to start ("the MIDI server can't be opened"),
+        and it stays broken until the Mac is rebooted. So: stop advertising,
+        drop the central, unregister the app, then quit the loop.
+        """
+        self._unregister_advertisement()
         if self._legacy_instance is not None:
             self._btmgmt("rm-adv", str(self._legacy_instance))
             self._legacy_instance = None
+        self._disconnect_centrals()
+        self._unregister_application()
         if self._loop is not None:
             self._loop.quit()
             self._loop = None
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
+        self._char = None
+        self._gatt = self._ads = self._bus = None
+
+    def _unregister_advertisement(self) -> None:
+        if self._ads is None or self._ad_path is None:
+            return
+        try:
+            self._ads.UnregisterAdvertisement(self._ad_path)
+            log.info("BLE MIDI advertisement unregistered")
+        except Exception as e:  # already gone, bluetoothd restarted, ...
+            log.warning("unregistering BLE advertisement failed: %s", e)
+        self._ad_path = None
+
+    def _unregister_application(self) -> None:
+        if self._gatt is None or self._app_path is None:
+            return
+        try:
+            self._gatt.UnregisterApplication(self._app_path)
+            log.info("BLE MIDI GATT service unregistered")
+        except Exception as e:
+            log.warning("unregistering BLE GATT app failed: %s", e)
+        self._app_path = None
+
+    def _disconnect_centrals(self) -> None:
+        """Disconnect every central on our adapter, so the host tears its side
+        down cleanly instead of waiting out the supervision timeout."""
+        if self._bus is None or self._dbus is None:
+            return
+        dbus = self._dbus
+        try:
+            om = dbus.Interface(self._bus.get_object(BLUEZ, "/"), OM_IFACE)
+            objects = om.GetManagedObjects()
+        except Exception as e:
+            log.warning("could not enumerate BLE devices: %s", e)
+            return
+        for path, interfaces in objects.items():
+            device = interfaces.get("org.bluez.Device1")
+            if not device or not device.get("Connected"):
+                continue
+            if not str(path).startswith(str(self._adapter_path) + "/"):
+                continue
+            try:
+                dbus.Interface(self._bus.get_object(BLUEZ, path),
+                               "org.bluez.Device1").Disconnect()
+                log.info("disconnected BLE central %s", path)
+            except Exception as e:
+                log.warning("disconnecting %s failed: %s", path, e)
 
     def _on_central_disconnect(self) -> None:
         """A connection on the btmgmt (legacy) path consumes the advertising

@@ -241,6 +241,95 @@ class SettingsLogicTest(unittest.TestCase):
         self.assertEqual(self.rows()["Hotspot"], "OFF")
         self.assertEqual(self.state.settings_wifi_status, "Hotspot failed")
 
+    def _open_header(self):
+        self.state.settings_index = MAIN_ITEMS.index("header")
+        self.press(9)
+
+    def test_header_popup_lists_items_with_positions(self):
+        self._open_header()
+        self.assertEqual(self.state.settings_view, "header")
+        rows = dict(self.state.settings_popup_rows)
+        self.assertEqual(rows["Patch"], "far left")
+        self.assertEqual(rows["BPM"], "far right")
+        self.assertEqual(rows["MIDI status"], "—")
+
+    def test_header_b1_to_b5_place_the_selected_item(self):
+        self._open_header()
+        self.press(7)  # down: BPM
+        self.press(3)  # B3 = middle
+        self.assertEqual(self.state.config["ui"]["header"],
+                         ["patch", None, "bpm", None, None])
+        self.assertEqual(self.saved[-1]["ui"]["header"][2], "bpm")
+
+    def test_header_placing_onto_an_occupied_slot_evicts(self):
+        self._open_header()
+        self.press(7)          # BPM
+        self.press(1)          # B1 = far left, where Patch lives
+        self.assertEqual(self.state.config["ui"]["header"],
+                         ["bpm", None, None, None, None])
+
+    def test_header_pressing_its_own_slot_removes_it(self):
+        self._open_header()
+        self.press(1)  # Patch is already at far left -> toggles off
+        self.assertEqual(self.state.config["ui"]["header"],
+                         [None, None, None, None, "bpm"])
+
+    def test_header_b10_returns_to_menu(self):
+        self._open_header()
+        self.press(10)
+        self.assertEqual(self.state.settings_view, "main")
+
+    def test_header_row_counts_filled_positions(self):
+        self.assertEqual(self.rows()["Header"], "2 set")
+        self.state.config["ui"]["header"] = [None] * 5
+        self.logic._build_rows()
+        self.assertEqual(self.rows()["Header"], "0 set")
+
+    def _open_hotspot_key(self):
+        self.state.settings_index = MAIN_ITEMS.index("hotspot_key")
+        self.press(9)
+
+    def test_hotspot_password_editor_prefills_current_key(self):
+        """Prefilled, not blank — editing one character of a 12-char key by
+        retyping the whole thing on footswitches would be miserable."""
+        self._open_hotspot_key()
+        self.assertEqual(self.state.settings_view, "hotspot_password")
+        self.assertEqual(self.state.settings_password, "pedalsetup")
+        self.assertEqual(self.state.settings_password_cursor, len("pedalsetup"))
+
+    def test_hotspot_password_saves_on_power(self):
+        self._open_hotspot_key()
+        for _ in range(len("pedalsetup")):
+            self.press(KEY_DELETE)
+        self.type_text("newsecret1")
+        self.press(BUTTON_NUM_POWER)
+        self.assertEqual(self.state.config["hotspot"]["password"], "newsecret1")
+        self.assertEqual(self.saved[-1]["hotspot"]["password"], "newsecret1")
+        self.assertEqual(self.state.settings_view, "main")
+
+    def test_hotspot_password_rejects_short_key(self):
+        """WPA2 refuses < 8 chars; catching it here beats a cryptic nmcli
+        failure later, when the radio has already left the network."""
+        self._open_hotspot_key()
+        for _ in range(len("pedalsetup")):
+            self.press(KEY_DELETE)
+        self.type_text("short")
+        self.press(BUTTON_NUM_POWER)
+        self.assertEqual(self.state.config["hotspot"]["password"], "pedalsetup")
+        self.assertEqual(self.state.settings_view, "hotspot_password")
+        self.assertIn("8+", self.state.settings_wifi_status)
+
+    def test_hotspot_password_row_shows_the_key(self):
+        self.assertEqual(self.rows()["Hotspot password"], "pedalsetup")
+
+    def test_delete_on_empty_hotspot_key_returns_to_menu(self):
+        self._open_hotspot_key()
+        for _ in range(len("pedalsetup")):
+            self.press(KEY_DELETE)
+        self.press(KEY_DELETE)  # now empty: backs out
+        self.assertEqual(self.state.settings_view, "main")
+        self.assertEqual(self.state.config["hotspot"]["password"], "pedalsetup")
+
     def test_preset_view_lists_presets_and_back(self):
         self._open_presets()
         self.assertEqual(self.state.settings_view, "presets")

@@ -17,8 +17,8 @@ from pathlib import Path
 
 from config.model import get_primary, get_secondary_action, get_slot, resolve_color
 from web.images import image_path
-from hardware import battery
-from logic.keypad import KEY_SHIFT, LEGEND
+from logic import header
+from logic.keypad import KEY_SHIFT, LEGEND_ROWS
 from hardware.constants import (DISPLAY_HEIGHT, DISPLAY_ROTATION_DEGREES,
                                 DISPLAY_WIDTH)
 from state.manager import StateManager
@@ -33,7 +33,9 @@ GRID_COLS = 5
 GRID_ROWS = 2
 PANEL_MARGIN = 8
 STATUS_BAR_HEIGHT = 22
-HEADER_HEIGHT = 52  # top strip: current patch, tempo, power (Milestone 16)
+HEADER_HEIGHT = 52  # top strip: 5 configurable items (logic/header.py)
+HEADER_MARGIN = 16  # screen edge -> the far-left/far-right items
+HEADER_GAP = 40  # far item -> the left/right item tucked in beside it
 FLICKER_PERIOD_S = 2.0  # primary+secondary both active -> alternate on_colors
 TEMPO_STALE_SECONDS = 2.0  # blank the BPM readout when the clock stops
 SCREENSHOT_PATH = "/tmp/controller-frame.png"
@@ -270,6 +272,9 @@ class UiRenderer:
             state.settings_password_cursor,
             state.settings_password_shift,
             state.settings_wifi_status,
+            state.header_network,
+            state.header_midi,
+            tuple(state.config["ui"].get("header") or ()),
             self._tempo_text(now),
             int(now / (FLICKER_PERIOD_S / 2)),
         )
@@ -393,7 +398,8 @@ class UiRenderer:
         theme = self.theme
         menu_id = self.state.current_menu
         menu = next((m for m in self.state.config["menus"] if m["id"] == menu_id), {})
-        name = (menu.get("name") or f"Menu {menu_id}").upper()
+        # Verbatim from the preset — the user's own casing, not shouted.
+        name = menu.get("name") or f"Menu {menu_id}"
         text = self._fit_text(name, rect.width - 32, 72)
         surface.blit(text, text.get_rect(centerx=rect.centerx, centery=rect.centery - 36))
         sub = font_small.render(f"MENU {menu_id}", True, pygame.Color(theme["disabled"]))
@@ -423,8 +429,6 @@ class UiRenderer:
                              button_num, holds)
 
     def _tempo_text(self, now: float) -> str:
-        if not self.state.config["ui"].get("show_tempo", True):
-            return ""  # readout disabled in device settings
         bpm = self.state.tempo_bpm
         if bpm is None or now - self.state.tempo_updated_at > TEMPO_STALE_SECONDS:
             return "--- BPM"
@@ -446,38 +450,81 @@ class UiRenderer:
         return None
 
     def _draw_header(self, pygame, surface, font_small) -> None:
-        """Top strip (Milestone 16): current patch on the left, tempo and
-        battery/charging status in the top right."""
-        theme = self.theme
-        pygame.draw.line(surface, pygame.Color(theme["panel_background"]),
-                         (0, HEADER_HEIGHT - 1),
-                         (surface.get_width(), HEADER_HEIGHT - 1), width=2)
+        """Top strip: five configurable positions, left to right, from
+        config["ui"]["header"] (see logic/header.py).
 
-        program = self.state.current_program
-        if program is None:
-            patch = "PATCH —"
-        else:
+        The outer two anchor to the screen edges. The "left" and "right" slots
+        then tuck in beside them — HEADER_GAP past whatever the far item
+        actually rendered, so they track its width instead of sitting at fixed
+        thirds and drifting away from (or colliding with) a long patch name.
+        An empty far slot simply hands its edge over. The middle stays
+        centered, independent of both.
+        """
+        theme = self.theme
+        width = surface.get_width()
+        pygame.draw.line(surface, pygame.Color(theme["panel_background"]),
+                         (0, HEADER_HEIGHT - 1), (width, HEADER_HEIGHT - 1),
+                         width=2)
+
+        slots = header.normalize(self.state.config["ui"].get("header"))
+        centery = HEADER_HEIGHT // 2
+
+        def render(position):
+            item = slots[position]
+            if item is None:
+                return None
+            label, dim = self._header_item(item)
+            color = pygame.Color(theme["disabled"] if dim else theme["text"])
+            return font_small.render(label, True, color)
+
+        surfaces = [render(position) for position in range(header.SLOT_COUNT)]
+        last = header.SLOT_COUNT - 1
+
+        # Outer slots first: they set the edges the inner ones hang off.
+        inner_left, inner_right = HEADER_MARGIN, width - HEADER_MARGIN
+        if surfaces[0] is not None:
+            rect = surfaces[0].get_rect(left=HEADER_MARGIN, centery=centery)
+            surface.blit(surfaces[0], rect)
+            inner_left = rect.right + HEADER_GAP
+        if surfaces[last] is not None:
+            rect = surfaces[last].get_rect(right=width - HEADER_MARGIN,
+                                           centery=centery)
+            surface.blit(surfaces[last], rect)
+            inner_right = rect.left - HEADER_GAP
+
+        if surfaces[1] is not None:
+            surface.blit(surfaces[1],
+                         surfaces[1].get_rect(left=inner_left, centery=centery))
+        if surfaces[3] is not None:
+            surface.blit(surfaces[3],
+                         surfaces[3].get_rect(right=inner_right, centery=centery))
+        if surfaces[2] is not None:
+            surface.blit(surfaces[2],
+                         surfaces[2].get_rect(centerx=width // 2, centery=centery))
+
+    def _header_item(self, item: str) -> tuple[str, bool]:
+        """(text, dimmed) for one header item. Dimmed = present but idle, so a
+        stopped clock or a dead link reads as "nothing coming in" rather than
+        looking the same as live data."""
+        if item == "patch":
+            program = self.state.current_program
+            if program is None:
+                return "PATCH —", True
             display = program + self.state.config["midi"]["program_display_base"]
             label = self._program_label(program)
-            patch = f"PATCH {display}" + (f"  ·  {label}" if label else "")
-        text = font_small.render(patch, True, pygame.Color(theme["text"]))
-        surface.blit(text, text.get_rect(left=16, centery=HEADER_HEIGHT // 2))
-
-        # Right side: power/battery status rightmost, tempo to its left.
-        info = battery.read()
-        if info is None:
-            power = "AC"  # no battery hardware yet (BMS milestone)
-        else:
-            power = f"{info['percent']}%" + (" CHG" if info["charging"] else "")
-        right = surface.get_width() - 16
-        text = font_small.render(power, True, pygame.Color(theme["text"]))
-        surface.blit(text, text.get_rect(right=right, centery=HEADER_HEIGHT // 2))
-        right -= text.get_width() + 48
-        tempo = self._tempo_text(time.monotonic())
-        if tempo:
-            color = theme["disabled"] if tempo.startswith("---") else theme["text"]
-            text = font_small.render(tempo, True, pygame.Color(color))
-            surface.blit(text, text.get_rect(right=right, centery=HEADER_HEIGHT // 2))
+            return f"PATCH {display}" + (f"  ·  {label}" if label else ""), False
+        if item == "bpm":
+            tempo = self._tempo_text(time.monotonic()) or "--- BPM"
+            return tempo, tempo.startswith("---")
+        if item == "network":
+            text = self.state.header_network
+            return text, text in ("no Wi-Fi", "…")
+        if item == "midi":
+            text = self.state.header_midi
+            return text, text in ("no midi connection", "…")
+        if item == "preset":
+            return self.state.config.get("preset_name") or "—", False
+        return "", True
 
     def _draw_error_screen(self, pygame, surface, font_big, font_small) -> None:
         """Shown instead of a dead UI thread when _draw raises: the app keeps
@@ -699,7 +746,8 @@ class UiRenderer:
         # Wi-Fi views draw as a popup window over the main settings rows;
         # while one is open, settings_index navigates the popup, so the
         # rows behind are drawn without a selection.
-        popup = view in ("wifi", "wifi_password")
+        popup = view in ("wifi", "wifi_password", "hotspot_password",
+                         "header")
         title = font_big.render("PRESETS" if in_presets else "SETTINGS",
                                 True, pygame.Color(theme["text"]))
         surface.blit(title, (40, 24))
@@ -726,8 +774,10 @@ class UiRenderer:
 
         if view == "wifi":
             self._draw_wifi_popup(pygame, surface, font_small)
-        elif view == "wifi_password":
+        elif view in ("wifi_password", "hotspot_password"):
             self._draw_password_popup(pygame, surface, font_small)
+        elif view == "header":
+            self._draw_header_popup(pygame, surface, font_small)
 
     def _draw_settings_rows(self, pygame, surface, font_small, rows,
                             selected_index, left, top, width, item_h) -> None:
@@ -781,44 +831,82 @@ class UiRenderer:
             text = font_small.render(status, True, pygame.Color(theme["text"]))
             surface.blit(text, (rect.left + 32, rect.bottom - status_h + 4))
 
-    def _draw_password_popup(self, pygame, surface, font_small) -> None:
-        """Password entry for a secured network (SettingsLogic view
-        "wifi_password"): the field on the left, the footswitch keypad legend
-        on the right so the mapping is readable while typing on the pedal. A
-        USB keyboard, when the port is in host mode, still works too."""
+    def _draw_header_popup(self, pygame, surface, font_small) -> None:
+        """Header layout editor (SettingsLogic view "header"): the items
+        on the left with the position each currently holds, and the five
+        positions across the bottom in the same order as the switches that
+        pick them — B1 far left … B5 far right."""
         theme = self.theme
-        rect = self._popup_frame(pygame, surface, (1560, 430))
-        text_color = pygame.Color(theme["text"])
+        rect = self._popup_frame(pygame, surface, (1500, 400))
         dim = pygame.Color(theme["disabled"])
-        # Left = the field being typed, right = what each switch does.
-        legend_width = 560
         left = rect.left + 32
-        field_width = rect.width - legend_width - 64
+        width = rect.width - 64
 
-        title = self._fit_text(f"JOIN {self.state.settings_wifi_ssid}",
-                               field_width, 36)
-        surface.blit(title, (left, rect.top + 24))
+        surface.blit(self._fit_text("HEADER", width, 34),
+                     (left, rect.top + 18))
 
-        box = pygame.Rect(left, rect.top + 84, field_width, 64)
+        rows = self.state.settings_popup_rows or [("…", "")]
+        index = min(self.state.settings_index, len(rows) - 1)
+        self._draw_settings_rows(pygame, surface, font_small, rows, index,
+                                 left, rect.top + 64, width, 40)
+
+        hint = font_small.render(
+            "B6/B7 choose  ·  B1-B5 place it  ·  press its own spot to remove"
+            "  ·  B10 done", True, dim)
+        surface.blit(hint, (left, rect.bottom - 96))
+
+        # The five positions, drawn where they sit on the header.
+        slots = header.normalize(self.state.config["ui"].get("header"))
+        labels = dict(header.HEADER_ITEMS)
+        cell_w = width // header.SLOT_COUNT
+        for position in range(header.SLOT_COUNT):
+            cell = pygame.Rect(left + position * cell_w, rect.bottom - 62,
+                               cell_w - 8, 44)
+            pygame.draw.rect(surface, dim, cell, width=2, border_radius=8)
+            item = slots[position]
+            key = font_small.render(f"B{position + 1}", True, dim)
+            surface.blit(key, (cell.left + 8, cell.top + 8))
+            text = self._fit_text(labels[item] if item else "—",
+                                  cell.width - 60, 28)
+            surface.blit(text, text.get_rect(centerx=cell.centerx + 16,
+                                             centery=cell.centery))
+
+    def _draw_password_popup(self, pygame, surface, font_small) -> None:
+        """Password entry, typed on the footswitches (logic/keypad.py). Serves
+        both joining a network (view "wifi_password") and editing the pedal's
+        own hotspot key (view "hotspot_password"); the keypad legend below the
+        field is laid out 2x5, the way the switches physically are."""
+        theme = self.theme
+        rect = self._popup_frame(pygame, surface, (1640, 440))
+        dim = pygame.Color(theme["disabled"])
+        left = rect.left + 32
+        width = rect.width - 64
+
+        editing_hotspot = self.state.settings_view == "hotspot_password"
+        heading = ("HOTSPOT PASSWORD" if editing_hotspot
+                   else f"JOIN {self.state.settings_wifi_ssid}")
+        surface.blit(self._fit_text(heading, width - 460, 34),
+                     (left, rect.top + 18))
+
+        status = self.state.settings_wifi_status
+        if status:
+            text = font_small.render(status, True, pygame.Color(theme["text"]))
+            surface.blit(text, text.get_rect(right=rect.right - 32,
+                                             top=rect.top + 22))
+
+        box = pygame.Rect(left, rect.top + 62, width, 58)
         pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), box,
                          border_radius=8)
         self._draw_password_field(pygame, surface, font_small, box)
 
-        hint = font_small.render("tap a key repeatedly to cycle characters",
-                                 True, dim)
-        surface.blit(hint, (left, box.bottom + 20))
-        confirm = font_small.render("POWER = connect  ·  DELETE on empty = back",
-                                    True, dim)
-        surface.blit(confirm, (left, box.bottom + 56))
+        confirm = ("POWER = save  ·  DELETE on empty = back  ·  8+ characters"
+                   if editing_hotspot
+                   else "POWER = connect  ·  DELETE on empty = back")
+        surface.blit(font_small.render(confirm, True, dim), (left, box.bottom + 12))
 
-        status = self.state.settings_wifi_status
-        if status:
-            surface.blit(font_small.render(status, True, text_color),
-                         (left, rect.bottom - 52))
-
-        self._draw_keypad_legend(pygame, surface, font_small,
-                                 rect.right - legend_width, rect.top + 24,
-                                 legend_width - 32)
+        self._draw_keypad_legend(pygame, surface, font_small, left,
+                                 box.bottom + 52, width,
+                                 rect.bottom - box.bottom - 68)
 
     def _draw_password_field(self, pygame, surface, font_small, box) -> None:
         """The password plus a caret at the cursor. When the text outgrows the
@@ -846,22 +934,34 @@ class UiRenderer:
         pygame.draw.rect(surface, color, caret)
 
     def _draw_keypad_legend(self, pygame, surface, font_small, left, top,
-                            width) -> None:
-        """Footswitch -> character map, drawn beside the field. SHIFT lights up
-        while it is latched so the case being typed is never a guess."""
+                            width, height) -> None:
+        """Footswitch -> character map as a 2x5 grid, mirroring the pedal: B1-B5
+        on the top row, B6-B10 on the bottom. SHIFT's cell lights up while it is
+        latched, so the case being typed is never a guess."""
         theme = self.theme
         shift_on = self.state.settings_password_shift
-        row_height = 34
-        for index, (button, label) in enumerate(LEGEND):
-            y = top + index * row_height
-            latched = button == KEY_SHIFT and shift_on
-            if latched:  # same highlight the settings rows use for selection
-                row = pygame.Rect(left - 8, y - 4, width, row_height)
-                pygame.draw.rect(surface, pygame.Color(theme["panel_background"]),
-                                 row, border_radius=8)
-                label = f"{label}  ▸ ABC"
-            key = font_small.render(f"B{button}", True,
-                                    pygame.Color(theme["disabled"]))
-            surface.blit(key, (left, y))
-            surface.blit(self._fit_text(label, width - 70, row_height - 6),
-                         (left + 70, y))
+        gap = 10
+        columns = max(len(row) for row in LEGEND_ROWS)
+        cell_w = (width - gap * (columns - 1)) // columns
+        cell_h = (height - gap) // len(LEGEND_ROWS)
+
+        for r, row in enumerate(LEGEND_ROWS):
+            for c, (button, label) in enumerate(row):
+                cell = pygame.Rect(left + c * (cell_w + gap),
+                                   top + r * (cell_h + gap), cell_w, cell_h)
+                latched = button == KEY_SHIFT and shift_on
+                pygame.draw.rect(
+                    surface,
+                    pygame.Color(theme["panel_background"] if latched
+                                 else theme["background"]),
+                    cell, border_radius=8)
+                pygame.draw.rect(surface, pygame.Color(theme["disabled"]), cell,
+                                 width=2, border_radius=8)
+                key = font_small.render(f"B{button}", True,
+                                        pygame.Color(theme["disabled"]))
+                surface.blit(key, (cell.left + 10, cell.top + 6))
+                if latched:
+                    label = "SHIFT ▸ ABC"
+                text = self._fit_text(label, cell.width - 20, 30)
+                surface.blit(text, text.get_rect(centerx=cell.centerx,
+                                                 bottom=cell.bottom - 8))

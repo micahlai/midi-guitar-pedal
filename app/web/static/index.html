@@ -34,6 +34,7 @@
   }
   .hint { color: var(--dim); font-size: 12px; margin: 0 2px 12px; }
 
+
   /* ---- overview ---- */
   .ov-menu { margin-bottom: 20px; }
   .ov-menu h2 { font-size: 14px; margin: 0 0 8px; color: var(--dim); }
@@ -339,10 +340,16 @@
         <div class="check"><input type="checkbox" id="set-ble"><label for="set-ble">Bluetooth (BLE) MIDI</label></div>
         <div class="hint">Disabling mutes a connection immediately; enabling one
           that was off at boot takes effect after a restart.</div>
-        <h2>Device — Display</h2>
-        <div class="check"><input type="checkbox" id="set-tempo"><label for="set-tempo">Tempo (BPM) readout in header</label></div>
-        <div class="hint">Off hides the readout and stops tracking incoming
-          MIDI clock; applies immediately.</div>
+        <h2>Device — Header</h2>
+        <div class="hint">What the header strip shows, left to right. Each position holds
+          one item and each item appears once — putting an item somewhere new
+          clears it from where it was. BPM also controls MIDI clock tracking:
+          leave it out and the clock is not followed at all.</div>
+        <div class="field"><label>Far left</label><select id="set-hdr0"></select></div>
+        <div class="field"><label>Left</label><select id="set-hdr1"></select></div>
+        <div class="field"><label>Middle</label><select id="set-hdr2"></select></div>
+        <div class="field"><label>Right</label><select id="set-hdr3"></select></div>
+        <div class="field"><label>Far right</label><select id="set-hdr4"></select></div>
       </div>
       <div class="col-device">
         <h2>Device — Buttons</h2>
@@ -1432,7 +1439,8 @@ const SETTING_PATHS = {
   preset_name: [],
   shift_hold_seconds: ["buttons"], secondary_hold_default_seconds: ["buttons"],
   program_display_base: ["midi"], default_channel: ["midi"],
-  usb_enabled: ["midi"], ble_enabled: ["midi"], show_tempo: ["ui"],
+  usb_enabled: ["midi"], ble_enabled: ["midi"],
+  header: ["ui"],
   expression_panel_width_ratio: ["ui"],
   theme_background: ["ui", "theme", "background"],
   theme_panel_background: ["ui", "theme", "panel_background"],
@@ -1468,6 +1476,40 @@ function bindCheck(id, key) {
   el.onchange = () => saveSettings({ [key]: el.checked });
 }
 
+const HEADER_ITEMS = [
+  ["patch", "Patch"], ["bpm", "BPM"], ["network", "Network status"],
+  ["midi", "MIDI status"], ["preset", "Preset name"],
+];
+
+function normalizeHeader(slots) {
+  // Tolerate a short/absent/hand-edited list rather than rendering a broken row.
+  const keys = HEADER_ITEMS.map(([key]) => key);
+  const clean = [null, null, null, null, null];
+  const seen = new Set();
+  (Array.isArray(slots) ? slots : []).slice(0, 5).forEach((item, i) => {
+    if (keys.includes(item) && !seen.has(item)) { clean[i] = item; seen.add(item); }
+  });
+  return clean;
+}
+
+function renderHeaderSlots(slots) {
+  for (let position = 0; position < 5; position++) {
+    const select = $("set-hdr" + position);
+    select.innerHTML = '<option value="">Nothing</option>' + HEADER_ITEMS.map(
+      ([key, label]) => '<option value="' + key + '">' + label + "</option>").join("");
+    select.value = slots[position] || "";
+    select.onchange = () => {
+      // One item, one position: placing it here vacates wherever it was, so the
+      // browser can never post a layout the device would reject.
+      const next = slots.slice();
+      const chosen = select.value;
+      if (chosen) next.forEach((item, i) => { if (item === chosen) next[i] = null; });
+      next[position] = chosen || null;
+      saveSettings({ header: next });
+    };
+  }
+}
+
 function bindColor(id, key) {
   const el = $(id);
   el.onchange = () => saveSettings({ [key]: el.value.toUpperCase() });
@@ -1492,7 +1534,7 @@ function initSettings() {
   $("set-webport").value = config.web.port;
   $("set-usb").checked = config.midi.usb_enabled;
   $("set-ble").checked = config.midi.ble_enabled;
-  $("set-tempo").checked = config.ui.show_tempo !== false;
+  renderHeaderSlots(normalizeHeader(config.ui.header));
   $("set-debounce").value = config.buttons.debounce_ms;
   $("set-dpress").value = config.buttons.power_double_press_ms;
   $("set-phold").value = config.buttons.power_hold_seconds;
@@ -1532,7 +1574,6 @@ function initSettings() {
   bindNumber("set-webport", "web_port", v => parseInt(v, 10));
   bindCheck("set-usb", "usb_enabled");
   bindCheck("set-ble", "ble_enabled");
-  bindCheck("set-tempo", "show_tempo");
   bindNumber("set-debounce", "debounce_ms", v => parseInt(v, 10));
   bindNumber("set-dpress", "power_double_press_ms", v => parseInt(v, 10));
   bindNumber("set-phold", "power_hold_seconds", parseFloat);

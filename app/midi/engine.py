@@ -129,9 +129,10 @@ class MidiEngine:
     def _on_incoming(self, msg) -> None:
         if msg.type == "clock":
             # Tempo is computed here on the input thread — ~48 pulses/s must
-            # not churn the main event queue. Read the toggle live so the
-            # web settings checkbox takes effect immediately.
-            if not self.config["ui"].get("show_tempo", True):
+            # not churn the main event queue, so skip the work entirely when
+            # nothing displays it. Read live, so adding/removing the header's
+            # BPM item takes effect immediately.
+            if "bpm" not in (self.config["ui"].get("header") or ()):
                 return
             bpm = self._tempo.clock(time.monotonic())
             if bpm is not None:

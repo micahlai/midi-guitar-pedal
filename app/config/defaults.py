@@ -14,10 +14,12 @@ DEFAULT_CONFIG = {
     "ui": {
         "screen_width": 1920,
         "screen_height": 480,
+        # Header strip, left to right: 5 positions, one item each (see
+        # logic/header.py). null = that position shows nothing. The default
+        # reproduces the original header minus the power readout. BPM's
+        # presence here is also what enables MIDI clock tracking.
+        "header": ["patch", None, None, None, "bpm"],
         "expression_panel_width_ratio": 0.12,
-        # Header BPM readout from incoming MIDI clock; off also stops the
-        # tempo tracking itself.
-        "show_tempo": True,
         # 10 shared palette slots. Action colors may reference one as
         # "palette:N" (0-9); editing a slot recolors every reference.
         "color_palette": [
@@ -175,9 +177,9 @@ DEVICE_SETTING_PATHS = (
     ("expression", "return_alpha"),
     ("expression", "return_interval_ms"),
     ("expression", "return_stop_threshold"),
+    ("ui", "header"),
     ("ui", "screen_width"),
     ("ui", "screen_height"),
-    ("ui", "show_tempo"),
 )
 
 

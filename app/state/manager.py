@@ -62,6 +62,10 @@ class StateManager:
         # popup; settings_index navigates the popup while it is open.
         self.settings_networks: list[dict] = []
         self.settings_popup_rows: list[tuple[str, str]] = []
+        # Header items (logic/status.py refreshes these off the render thread,
+        # which must never shell out at 30 fps).
+        self.header_network = "…"
+        self.header_midi = "…"
         self.settings_wifi_ssid = ""
         self.settings_password = ""
         # Footswitch text entry (logic/keypad.py): caret position inside the
