@@ -339,6 +339,10 @@
         <div class="check"><input type="checkbox" id="set-ble"><label for="set-ble">Bluetooth (BLE) MIDI</label></div>
         <div class="hint">Disabling mutes a connection immediately; enabling one
           that was off at boot takes effect after a restart.</div>
+        <h2>Device — Display</h2>
+        <div class="check"><input type="checkbox" id="set-tempo"><label for="set-tempo">Tempo (BPM) readout in header</label></div>
+        <div class="hint">Off hides the readout and stops tracking incoming
+          MIDI clock; applies immediately.</div>
       </div>
       <div class="col-device">
         <h2>Device — Buttons</h2>
@@ -1428,7 +1432,7 @@ const SETTING_PATHS = {
   preset_name: [],
   shift_hold_seconds: ["buttons"], secondary_hold_default_seconds: ["buttons"],
   program_display_base: ["midi"], default_channel: ["midi"],
-  usb_enabled: ["midi"], ble_enabled: ["midi"],
+  usb_enabled: ["midi"], ble_enabled: ["midi"], show_tempo: ["ui"],
   expression_panel_width_ratio: ["ui"],
   theme_background: ["ui", "theme", "background"],
   theme_panel_background: ["ui", "theme", "panel_background"],
@@ -1488,6 +1492,7 @@ function initSettings() {
   $("set-webport").value = config.web.port;
   $("set-usb").checked = config.midi.usb_enabled;
   $("set-ble").checked = config.midi.ble_enabled;
+  $("set-tempo").checked = config.ui.show_tempo !== false;
   $("set-debounce").value = config.buttons.debounce_ms;
   $("set-dpress").value = config.buttons.power_double_press_ms;
   $("set-phold").value = config.buttons.power_hold_seconds;
@@ -1527,6 +1532,7 @@ function initSettings() {
   bindNumber("set-webport", "web_port", v => parseInt(v, 10));
   bindCheck("set-usb", "usb_enabled");
   bindCheck("set-ble", "ble_enabled");
+  bindCheck("set-tempo", "show_tempo");
   bindNumber("set-debounce", "debounce_ms", v => parseInt(v, 10));
   bindNumber("set-dpress", "power_double_press_ms", v => parseInt(v, 10));
   bindNumber("set-phold", "power_hold_seconds", parseFloat);

@@ -55,6 +55,15 @@ GPIO_POWER_BUTTON = 21
 # Event-stream button number for the power button (footswitches are 1-10).
 BUTTON_NUM_POWER = 0
 
+# The power button is ALSO wired to GPIO 3, the SoC's wake-from-halt pin:
+# pulling it low boots a halted Pi that still has power, which is what makes
+# the button turn the pedal back ON. That is pure firmware behavior — there is
+# no driver and no code path for it, so the app must never claim this pin (and
+# I2C must stay off in config.txt: GPIO 2/3 are SDA/SCL, and enabling the bus
+# would fight the button). While the pedal is running, presses are read on
+# GPIO 21 as usual and the low pulse on GPIO 3 is simply ignored.
+GPIO_POWER_WAKE = 3
+
 # Moved from draft GPIO 23 (now B5). Low = pedal plugged in (jack switch to
 # GND, internal pull-up).
 GPIO_EXPRESSION_DETECT = 2

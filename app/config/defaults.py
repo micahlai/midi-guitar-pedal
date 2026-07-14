@@ -15,6 +15,9 @@ DEFAULT_CONFIG = {
         "screen_width": 1920,
         "screen_height": 480,
         "expression_panel_width_ratio": 0.12,
+        # Header BPM readout from incoming MIDI clock; off also stops the
+        # tempo tracking itself.
+        "show_tempo": True,
         # 10 shared palette slots. Action colors may reference one as
         # "palette:N" (0-9); editing a slot recolors every reference.
         "color_palette": [
@@ -43,6 +46,14 @@ DEFAULT_CONFIG = {
     "web": {
         "enabled": True,
         "port": 8080,
+    },
+    "hotspot": {
+        "ssid": "GuitarPedal",
+        "password": "pedalsetup",
+        # Self-host after this long with no Wi-Fi, so a pedal that boots away
+        # from any known network is still reachable for configuration.
+        "auto_fallback": True,
+        "fallback_seconds": 45,
     },
     "midi": {
         "usb_enabled": True,
@@ -149,6 +160,10 @@ DEVICE_SETTING_PATHS = (
     ("device", "hostname"),
     ("web", "enabled"),
     ("web", "port"),
+    ("hotspot", "ssid"),
+    ("hotspot", "password"),
+    ("hotspot", "auto_fallback"),
+    ("hotspot", "fallback_seconds"),
     ("midi", "usb_enabled"),
     ("midi", "ble_enabled"),
     ("buttons", "debounce_ms"),
@@ -162,6 +177,7 @@ DEVICE_SETTING_PATHS = (
     ("expression", "return_stop_threshold"),
     ("ui", "screen_width"),
     ("ui", "screen_height"),
+    ("ui", "show_tempo"),
 )
 
 

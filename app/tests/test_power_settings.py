@@ -4,6 +4,8 @@ import copy
 import unittest
 
 from config.defaults import default_config
+from hardware.constants import BUTTON_NUM_POWER
+from logic.keypad import KEY_DELETE, KEY_SHIFT
 from logic.power import PowerLogic
 from logic.settings import MAIN_ITEMS, SettingsLogic
 from state.manager import StateManager
@@ -69,8 +71,13 @@ class FakeSysinfo:
         ]
         self.connect_calls = []
         self.connect_result = (True, "Connected to Studio5G")
+        self.scan_forced = []
+        self.ap = False
+        self.ap_calls = []
+        self.ap_start_result = (True, "Hosting GuitarPedal")
 
-    def wifi_scan(self):
+    def wifi_scan(self, force=False):
+        self.scan_forced.append(force)
         return copy.deepcopy(self.networks)
 
     def wifi_connect(self, ssid, password=None):
@@ -94,6 +101,25 @@ class FakeSysinfo:
 
     def set_pairing(self, enabled):
         self.pairing_calls.append(enabled)
+
+    def ap_active(self):
+        return self.ap
+
+    def ap_start(self, ssid, password):
+        self.ap_calls.append(("start", ssid, password))
+        ok, message = self.ap_start_result
+        if ok:
+            self.ap = True
+            self.ssid = None  # radio left the client network
+        return ok, message
+
+    def ap_stop(self):
+        self.ap_calls.append(("stop",))
+        self.ap = False
+        return True, "Hotspot off"
+
+    def wifi_connected(self):
+        return self.ssid is not None and not self.ap
 
 
 class FakePresets:
@@ -191,6 +217,30 @@ class SettingsLogicTest(unittest.TestCase):
         self.state.settings_index = MAIN_ITEMS.index("preset")
         self.press(9)
 
+    def test_hotspot_toggle_starts_and_stops_the_ap(self):
+        self.state.settings_index = MAIN_ITEMS.index("hotspot")
+        self.press(9)
+        self.assertEqual(self.sysinfo.ap_calls,
+                         [("start", "GuitarPedal", "pedalsetup")])
+        self.assertTrue(self.sysinfo.ap)
+        self.press(9)
+        self.assertEqual(self.sysinfo.ap_calls[-1], ("stop",))
+        self.assertFalse(self.sysinfo.ap)
+
+    def test_hotspot_row_shows_ssid_while_hosting(self):
+        self.state.settings_index = MAIN_ITEMS.index("hotspot")
+        self.press(9)
+        self.assertEqual(self.rows()["Hotspot"], "ON  ·  GuitarPedal")
+        # The radio can't also be a client, so Wi-Fi must not claim an SSID.
+        self.assertEqual(self.rows()["Wi-Fi"], "hosting")
+
+    def test_failed_hotspot_start_rolls_the_row_back(self):
+        self.sysinfo.ap_start_result = (False, "Hotspot failed")
+        self.state.settings_index = MAIN_ITEMS.index("hotspot")
+        self.press(9)
+        self.assertEqual(self.rows()["Hotspot"], "OFF")
+        self.assertEqual(self.state.settings_wifi_status, "Hotspot failed")
+
     def test_preset_view_lists_presets_and_back(self):
         self._open_presets()
         self.assertEqual(self.state.settings_view, "presets")
@@ -255,6 +305,15 @@ class SettingsLogicTest(unittest.TestCase):
     def type_text(self, text):
         for ch in text:
             self.logic.handle_key((ord(ch.lower()), ch))
+
+    def test_opening_and_rescan_both_request_a_real_sweep(self):
+        """NM's cached list decays to just the associated AP while connected,
+        so the popup must force a sweep rather than trust the cache."""
+        self._open_wifi()
+        self.assertEqual(self.sysinfo.scan_forced, [True])
+        self.state.settings_index = len(self.sysinfo.networks)  # the Rescan row
+        self.press(9)
+        self.assertEqual(self.sysinfo.scan_forced, [True, True])
 
     def test_wifi_row_opens_network_popup(self):
         self._open_wifi()
@@ -327,10 +386,11 @@ class SettingsLogicTest(unittest.TestCase):
         self.assertEqual(self.sysinfo.connect_calls, [("Studio5G", "hunter42")])
         self.assertEqual(self.state.settings_view, "main")
 
-    def test_select_button_submits_password(self):
+    def test_power_button_submits_password(self):
+        """Every footswitch types a character now, so POWER is confirm."""
         self._open_password()
         self.type_text("hunter42")
-        self.press(9)
+        self.press(BUTTON_NUM_POWER)
         self.assertEqual(self.sysinfo.connect_calls, [("Studio5G", "hunter42")])
 
     def test_empty_password_not_submitted(self):
@@ -358,10 +418,28 @@ class SettingsLogicTest(unittest.TestCase):
         self.assertEqual([r[0] for r in self.state.settings_popup_rows],
                          ["HomeNet", "CoffeeShop", "Studio5G", "Rescan", "Back"])
 
-    def test_exit_button_in_password_view_returns_to_list(self):
+    def test_delete_on_empty_password_returns_to_list(self):
+        """B9/B10 are cursor keys now; DELETE on an empty field is the way out."""
         self._open_password()
-        self.press(10)
+        self.press(KEY_DELETE)
         self.assertEqual(self.state.settings_view, "wifi")
+
+    def test_delete_with_text_edits_instead_of_leaving(self):
+        self._open_password()
+        self.type_text("ab")
+        self.press(KEY_DELETE)
+        self.assertEqual(self.state.settings_view, "wifi_password")
+        self.assertEqual(self.state.settings_password, "a")
+
+    def test_footswitch_typing_builds_the_password(self):
+        self._open_password()
+        self.press(2)                       # a
+        self.press(KEY_SHIFT)
+        self.press(3)                       # H
+        self.press(1)                       # 0
+        self.assertEqual(self.state.settings_password, "aH0")
+        self.press(BUTTON_NUM_POWER)
+        self.assertEqual(self.sysinfo.connect_calls, [("Studio5G", "aH0")])
 
     def test_keys_ignored_outside_password_view(self):
         self._open_wifi()
@@ -427,10 +505,12 @@ class SysinfoWifiTest(unittest.TestCase):
         self.assertIn("secret99", connect)
 
     def test_connect_open_network_sends_no_password(self):
-        self.results = [(0, "", "")]
+        self.results = [(1, "", ""),  # profile lookup: no saved profile
+                        (0, "", "")]
         self.sysinfo.wifi_connect("Cafe", None)
-        self.assertNotIn("password", self.commands[0])
-        self.assertNotIn("connection", self.commands[0])  # no profile delete
+        joined = [c for c in self.commands if "wifi" in c and "connect" in c][0]
+        self.assertNotIn("password", joined)
+        self.assertNotIn("delete", [word for c in self.commands for word in c])
 
     def test_connect_wrong_password_maps_message(self):
         self.results = [(0, "", ""),
@@ -440,8 +520,11 @@ class SysinfoWifiTest(unittest.TestCase):
         ok, message = self.sysinfo.wifi_connect("HomeNet", "wrong")
         self.assertFalse(ok)
         self.assertEqual(message, "Wrong password")
-        # The lingering failed profile gets deleted.
-        self.assertEqual(self.commands[-1][:3], ("nmcli", "connection", "delete"))
+        # The profile this call created gets deleted (as root — NM edits are
+        # polkit-gated and the app has no login session).
+        self.assertEqual(self.commands[-1],
+                         ("sudo", "-n", "nmcli", "connection", "delete", "id",
+                          "HomeNet"))
 
 
 if __name__ == "__main__":

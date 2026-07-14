@@ -64,6 +64,10 @@ class StateManager:
         self.settings_popup_rows: list[tuple[str, str]] = []
         self.settings_wifi_ssid = ""
         self.settings_password = ""
+        # Footswitch text entry (logic/keypad.py): caret position inside the
+        # password and whether SHIFT is latched — both drawn by the renderer.
+        self.settings_password_cursor = 0
+        self.settings_password_shift = False
         self.settings_wifi_status = ""
         # (config_version, mode) cache for the default expression scan.
         self._default_expression_cache: tuple[int, tuple | None] = (-1, None)

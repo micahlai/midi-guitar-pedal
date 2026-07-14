@@ -6,7 +6,13 @@ set -euo pipefail
 HOST="${1:-pedal}"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-rsync -av --delete --exclude '__pycache__' "$REPO_DIR/app/" "$HOST:/opt/midi-controller/app/"
+# .lgd-* are root-owned FIFOs lgpio creates at runtime in the working
+# directory. --delete cannot unlink them, rsync exits 23, and `set -e` then
+# aborts the deploy BEFORE the systemd units are installed — a silent
+# half-deploy that is very hard to spot. Leave them alone.
+rsync -av --delete --exclude '__pycache__' --exclude '.pytest_cache' \
+    --exclude '.lgd-*' \
+    "$REPO_DIR/app/" "$HOST:/opt/midi-controller/app/"
 rsync -av "$REPO_DIR/scripts/" "$HOST:/opt/midi-controller/scripts/"
 rsync -av "$REPO_DIR/systemd/" "$HOST:/tmp/systemd-units/"
 

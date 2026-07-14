@@ -8,8 +8,17 @@ StartLimitIntervalSec=0
 Type=notify
 NotifyAccess=main
 User=micah
-WorkingDirectory=/opt/midi-controller/app
+# NOT app/: lgpio drops a .lgd-nfy* FIFO in the working directory, and a FIFO
+# inside the rsync target makes deploy.sh's --delete fail (exit 23).
+WorkingDirectory=/opt/midi-controller
 ExecStart=/opt/midi-controller/venv/bin/python /opt/midi-controller/app/main.py
+# web/portal.py binds :80 (the captive-portal redirect) — a privileged port,
+# and the service does not run as root.
+# Do NOT add CapabilityBoundingSet here: it caps every child too, and the
+# sudo'd btmgmt that raises the BLE advertisement needs CAP_NET_ADMIN for its
+# raw HCI socket. Bounding it to CAP_NET_BIND_SERVICE kills BLE advertising
+# silently ("add-adv did not confirm").
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=2
 # main.py pings WATCHDOG=1 every 10 s; a hung main loop restarts the service.

@@ -123,6 +123,7 @@ class ApplySettingsTest(unittest.TestCase):
             "debounce_ms": 40,
             "power_double_press_ms": 500,
             "power_hold_seconds": 4.0,
+            "show_tempo": False,
             "detect_enabled": False,
             "send_deadband": 2,
             "poll_interval_ms": 20,
@@ -134,6 +135,7 @@ class ApplySettingsTest(unittest.TestCase):
         self.assertEqual(self.config["web"]["port"], 9000)
         self.assertEqual(self.config["buttons"]["debounce_ms"], 40)
         self.assertEqual(self.config["buttons"]["power_hold_seconds"], 4.0)
+        self.assertFalse(self.config["ui"]["show_tempo"])
         self.assertFalse(self.config["expression"]["detect_enabled"])
         self.assertEqual(self.config["expression"]["poll_interval_ms"], 20)
         self.assertEqual(self.config["expression"]["return_alpha"], 0.2)
@@ -151,6 +153,7 @@ class ApplySettingsTest(unittest.TestCase):
             {"power_double_press_ms": 50},
             {"power_hold_seconds": 60},
             {"detect_enabled": "yes"},
+            {"show_tempo": "off"},
             {"send_deadband": -1},
             {"poll_interval_ms": 1},
             {"return_alpha": 0.0},

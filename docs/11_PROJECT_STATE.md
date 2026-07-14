@@ -805,6 +805,154 @@ pygame/KMSDRM with the 5x2 button grid and expression strip placeholder.
   (`sudo usermod -aG input micah`, then restart the service) if keys
   don't arrive.
 
+### Post-M16 — tempo toggle + button inversion fix (2026-07-11)
+- **BPM readout toggle**: `ui.show_tempo` (bool, default true, DEVICE scope
+  — added to DEVICE_SETTING_PATHS). Web Settings tab gained "Device —
+  Display" with a "Tempo (BPM) readout in header" checkbox. Off hides the
+  header readout (`_tempo_text` returns "") AND stops tempo tracking (the
+  engine drops clock pulses before TempoTracker; both read the config live,
+  no restart). Loader back-fills old configs.
+- **Button inversion bug fixed** (user report: a button sometimes stayed
+  "pressed" after release, then all further presses inverted). Root cause
+  in `hardware/buttons.py`: an edge landing inside the debounce window was
+  dropped WITHOUT updating the tracked state — a genuine quick release was
+  swallowed for good, the next physical press was deduped as a same-state
+  repeat, and press/release arrived inverted from then on.
+- Fix: every edge (accepted or debounced) arms a one-shot reconcile timer
+  (debounce + 5 ms, one pending per pin) that reads the REAL pin level
+  (gpiozero is_pressed) after the window and emits a corrective event if
+  the tracked state drifted; still-settling reconciles re-arm. Bookkeeping
+  is lock-protected across gpiozero callback threads and timer threads;
+  events are emitted outside the lock. Buttons are now kept in a dict
+  (num -> Button) so reconcile can read levels; an initial release edge
+  with no prior press is ignored (tracked state defaults to released).
+- 228 unit tests passing (12 new: `tests/test_buttons.py` — quick-tap
+  recovery incl. the next-press regression, bounce-while-held silence,
+  reschedule-inside-window, real-timer end-to-end; tempo gating in engine
+  + renderer; show_tempo in apply_settings).
+- NOT yet deployed (SSH to the Pi still broken): the reconcile fix needs a
+  real bench test with the flaky switch that showed the inversion.
+
+### SD card rebuilt from scratch + Wi-Fi lockout fixed (2026-07-13)
+
+**How the lockout happened** (root cause, now fixed): `sysinfo.wifi_connect()`
+deleted the saved NetworkManager profile on ANY failed connect. A failed join
+attempt from the on-device Wi-Fi menu therefore destroyed the credentials for
+the network the pedal was reachable on — unrecoverable on a headless box with
+no keyboard. Fixed: a profile that existed before the call is never deleted;
+a wrong retype is rolled back to the stored passphrase; only a profile the
+call created itself is cleaned up. Regression tests in
+`tests/test_wifi_connect.py`.
+
+**Profiles are matched by SSID, not by name** (`sysinfo.profile_for_ssid`).
+Pi Imager provisions Wi-Fi via netplan, so the profile is named
+`netplan-wlan0-<SSID>` — verified on the device: SSID `Hogwarts` lives in
+profile `netplan-wlan0-Hogwarts`. A name-based lookup misses the very network
+the pedal boots on, which would make the retype path create a second profile
+and roll back the wrong one.
+
+Recovery took a full card rebuild. What was NOT written down and cost hours —
+all now handled by `scripts/setup-provision.sh`:
+- **Raspberry Pi OS Lite ships no GL userspace.** Without `libegl1 libgles2
+  libegl-mesa0 libgbm1` the panel is BLACK and the journal says only
+  "display init failed: EGL not initialized". The old card had these from
+  some earlier install; the dep list never recorded them.
+- **BlueZ needs `Experimental = true`** in `/etc/bluetooth/main.conf` or GATT
+  registration fails with a D-Bus NoReply and BLE MIDI registers no service.
+  Advertising alone is not enough — the notes ride on GATT.
+- `python3-mido` was also missing from the documented dep list.
+- Fresh card: Raspbian 13 (trixie) 32-bit, hostname `guitar-pedal`, user
+  `micah`, key auth. Imager's "Edit Settings" writes hostname/user/SSH
+  key/Wi-Fi correctly — use it rather than hand-editing boot files.
+- **`ssh pedal` failing with "Permission denied (publickey)" was NOT the Pi.**
+  The Mac's `id_ed25519` is passphrase-protected and ssh-agent had no
+  identities. `ssh-add --apple-load-keychain` fixed it (the passphrase was
+  already in the keychain). Check the agent BEFORE suspecting the device.
+- LOST with the old card (not in the repo, never recovered): `config.json`,
+  saved presets, uploaded button images. The old card is still readable —
+  mount it on a Linux box / the Pi itself via a USB reader to get them back.
+
+**New: hotspot / AP mode** (`sysinfo.ap_start/ap_stop/ap_active`,
+`logic/hotspot.py`, Hotspot row in the settings menu). The pedal can host its
+own network so a laptop reaches the web editor with no infrastructure Wi-Fi.
+The single radio cannot be client and AP at once, so raising the AP drops
+Wi-Fi. The AP profile is `connection.autoconnect=no`, so a reboot ALWAYS
+returns to Wi-Fi client — a bad hotspot can never be sticky. Auto-fallback:
+`hotspot.auto_fallback` (default on) hosts the AP if no Wi-Fi has connected
+`fallback_seconds` (45) after boot. Config in `hotspot.{ssid,password}`
+(device-scoped; default GuitarPedal / pedalsetup).
+
+**New: footswitch text entry** (`logic/keypad.py`). Wi-Fi passwords are now
+typeable on the pedal alone, phone-keypad style — B1 digits, B2-B5 letters,
+B6 symbols, B7 SHIFT (sticky), B8 DELETE, B9/B10 cursor, POWER confirms
+(DELETE on an empty field backs out; there is no spare switch to cancel
+with). Tapping a key repeatedly cycles its characters within
+MULTITAP_SECONDS. The legend is drawn beside the field so the mapping is
+readable while typing. The USB keyboard path still works.
+
+**USB is now `dtoverlay=dwc2,dr_mode=otg`** (was `peripheral`). Peripheral
+mode makes the port a device port, so NO USB KEYBOARD CAN ENUMERATE — which
+is why the on-device password popup was unusable. OTG auto-detects: OTG
+adapter -> host (keyboard), laptop cable -> peripheral (MIDI gadget).
+VERIFIED after reboot: `f_midi` still binds, ALSA client 20.
+
+**Power button now also wired to GPIO 3** (`constants.GPIO_POWER_WAKE`), the
+SoC's wake-from-halt pin: pulling it low boots a halted Pi that still has
+power, so the button turns the pedal back ON. Pure firmware — no driver, no
+code. The app must never claim GPIO 3, and **I2C must stay off** in
+config.txt (GPIO 2/3 are SDA/SCL and the bus would fight the button).
+Running behavior is unchanged: presses are read on GPIO 21 as before.
+NOT YET BENCH-VERIFIED (needs a halt + physical press).
+
+### Wi-Fi scan, captive portal, BLE pairing — and three silent failures (2026-07-14)
+
+**Wi-Fi scanning needs root** (`sysinfo._run_root`). NM's polkit policy
+authorizes scan/connect/profile-edit only for an ACTIVE LOCAL SESSION; the
+controller is a session-less systemd service, so `nmcli dev wifi rescan` came
+back "not authorized" — and nmcli reports that by printing its CACHED list, so
+it looked like an empty neighborhood, never an error. The cache decays to just
+the associated AP while connected, hence the on-device menu showing "No
+networks found" / one network. Now: request the rescan via `sudo -n`, wait
+SCAN_SETTLE_SECONDS, then read. Verified session-less: 6 networks in 5.2 s
+(was 1). Reading a saved passphrase (`nmcli -s`) and every NM mutation
+(connect/modify/delete/hotspot) are privileged for the same reason and all go
+through `_run_root`. **The hotspot would have failed for this reason too.**
+
+**Hotspot VERIFIED on hardware** by the user: AP came up, laptop joined, web
+editor loaded. Reboot returned the pedal to Wi-Fi client automatically
+(AP profile is autoconnect=no), as designed.
+
+**Captive portal** (`web/portal.py` + `scripts/setup-captive-portal.sh`):
+joining the hotspot pops the editor open like a hotel Wi-Fi page. Two halves —
+a wildcard `address=/#/10.42.0.1` in `/etc/NetworkManager/dnsmasq-shared.d/`
+(SHARED-MODE ONLY, so the pedal's own client DNS is untouched), and a tiny
+:80 server that 302s every request to the editor on 8080. The OS probe
+(captive.apple.com / generate_204 / msftconnecttest) then sees "not the
+expected answer" and opens its portal window. Port 80 is privileged, hence
+`AmbientCapabilities=CAP_NET_BIND_SERVICE` on the unit.
+
+**BLE MIDI: adapter must be Pairable.** A fresh image is `Pairable: no`, so
+the pedal ADVERTISES (host sees it) and then refuses the bond — "appears in
+the Bluetooth list but won't connect". `midi/ble.py` now sets Pairable at
+startup; `setup-provision.sh` also persists `AlwaysPairable = true`. This is
+separate from the settings menu's "Pairing mode" row (BR/EDR discoverability).
+
+**Three silent failures worth remembering** — each looked like a different bug:
+1. `CapabilityBoundingSet=CAP_NET_BIND_SERVICE` on the unit (added for the
+   portal) caps EVERY CHILD, including the sudo'd `btmgmt` that raises the BLE
+   advertisement — it needs CAP_NET_ADMIN for its raw HCI socket. BLE
+   advertising died with only "add-adv did not confirm". Use
+   AmbientCapabilities ALONE; never bound the set here.
+2. `setup-provision.sh` run WITH sudo chowned /opt/midi-controller to root
+   ($USER is root under sudo). Fixed with SUDO_USER — but see 3 for why it
+   went unnoticed.
+3. **deploy.sh was silently half-deploying.** lgpio drops a root-owned
+   `.lgd-nfy*` FIFO in the working directory; `rsync --delete` cannot unlink
+   it, exits 23, and `set -e` aborted the script BEFORE installing the systemd
+   units — so unit changes never landed while the app code did. Fixed by
+   moving WorkingDirectory out of app/ and excluding `.lgd-*`. **If a unit
+   change appears to have no effect, check deploy.sh's exit status first.**
+
 ## Current Milestone
 
 All roadmap milestones through 16 complete. Next up: user hardware bring-up

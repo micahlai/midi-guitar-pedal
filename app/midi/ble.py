@@ -175,6 +175,12 @@ class BleMidiServer:
             adapter_props = dbus.Interface(bus.get_object(BLUEZ, adapter_path), PROPS_IFACE)
             adapter_props.Set(ADAPTER, "Powered", dbus.Boolean(True))
             adapter_props.Set(ADAPTER, "Alias", dbus.String(self.device_name))
+            # Advertising is not enough: a central that tries to bond against a
+            # non-pairable adapter is refused, so the pedal SHOWS UP in the
+            # host's Bluetooth list and then fails to connect. A fresh Pi image
+            # comes up Pairable=no. This is independent of the settings menu's
+            # "Pairing mode" row, which drives BR/EDR discoverability.
+            adapter_props.Set(ADAPTER, "Pairable", dbus.Boolean(True))
 
             App, Service, Char, Ad = _build_classes(dbus, dbus.service)
             service = Service(bus)
@@ -250,6 +256,12 @@ class BleMidiServer:
         else:
             log.error("adapter never powered on; BLE advertising not started")
             return
+        # The -c below marks the ADVERTISING INSTANCE connectable, but the
+        # ADAPTER has its own `connectable` setting and a fresh Pi image comes
+        # up with it OFF. The pedal then advertises — the host lists it — and
+        # the controller refuses the incoming connection: "shows up in the
+        # Bluetooth list, won't connect". Nothing logs an error either side.
+        self._btmgmt("connectable", "on")
         self._btmgmt("rm-adv", "1")
         out = self._btmgmt("add-adv", "-c", "-g", "-s", self._scan_rsp_hex(),
                            "-u", MIDI_SERVICE_UUID, "1")

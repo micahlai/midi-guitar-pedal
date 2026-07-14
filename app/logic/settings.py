@@ -13,7 +13,13 @@ networks (view "wifi"; scan/connect run on worker threads). Choosing a
 secured network opens a password popup (view "wifi_password") typed on a
 USB keyboard plugged into the Pi — key events arrive via handle_key() from
 the main loop (Enter = connect, Esc = back, Backspace edits; B9/B10 mirror
-Enter/Esc for keyboard-less navigation).
+Enter/Esc for keyboard-less navigation). The keyboard needs the USB port in
+host mode (dtoverlay=dwc2,dr_mode=otg + an OTG adapter); under dr_mode=
+peripheral the port is a device port and no keyboard can enumerate.
+
+Hotspot row: toggles the pedal's own access point (hardware/sysinfo.ap_*),
+so a laptop can reach the web editor with no infrastructure network. The
+single radio cannot be client and AP at once, so turning it ON drops Wi-Fi.
 """
 
 import logging
@@ -23,6 +29,8 @@ from config import presets
 from config.defaults import copy_device_settings
 from config.loader import save_config
 from hardware import sysinfo
+from hardware.constants import BUTTON_NUM_POWER
+from logic.keypad import KEY_DELETE, MultiTapKeypad
 
 log = logging.getLogger("controller.logic.settings")
 
@@ -43,7 +51,8 @@ REFRESH_SECONDS = 2.0
 
 # Main-view items, in display order. Info rows refresh on select; pairing
 # toggles; preset opens the preset list view; exit closes the menu.
-MAIN_ITEMS = ("wifi", "bluetooth", "usb", "network", "pairing", "preset", "exit")
+MAIN_ITEMS = ("wifi", "hotspot", "bluetooth", "usb", "network", "pairing",
+              "preset", "exit")
 
 
 class SettingsLogic:
@@ -63,18 +72,17 @@ class SettingsLogic:
         self._wifi_items: list[tuple] = []
         self._scanning = False
         self._connecting = False
+        self._hotspot_busy = False
+        self.keypad = MultiTapKeypad(max_chars=PASSWORD_MAX_CHARS)
 
     # --- events (main loop) --------------------------------------------------
 
     def handle_event(self, event: tuple) -> None:
-        num, kind, _t = event
+        num, kind, t = event
         if kind != "press":
             return
         if self.state.settings_view == "wifi_password":
-            if num == BUTTON_SELECT:
-                self._submit_password()
-            elif num == BUTTON_EXIT:
-                self._show_wifi(rescan=False)
+            self._handle_password_button(num, t)
             return
         rows = len(self._nav_rows()) or 1
         if num == BUTTON_UP:
@@ -89,20 +97,48 @@ class SettingsLogic:
             else:
                 self._close()
 
+    def _handle_password_button(self, num: int, now: float) -> None:
+        """Footswitch text entry (see logic/keypad.py). POWER confirms;
+        DELETE on an empty field backs out — with every other switch bound to
+        a character there is no spare one to cancel with."""
+        if self._connecting:
+            return
+        if num == BUTTON_NUM_POWER:
+            self._submit_password()
+            return
+        if num == KEY_DELETE and not self.keypad.text:
+            self._show_wifi(rescan=False)
+            return
+        self.keypad.press(num, now)
+        self._sync_password()
+
+    def _sync_password(self) -> None:
+        """Publish the keypad buffer to the render thread."""
+        self.state.settings_password = self.keypad.text
+        self.state.settings_password_cursor = self.keypad.cursor
+        self.state.settings_password_shift = self.keypad.shift
+
+    def _reset_keypad(self) -> None:
+        self.keypad.reset()
+        self._sync_password()
+
     def handle_key(self, payload: tuple) -> None:
-        """USB keyboard input (key, unicode char) — password entry only."""
+        """USB keyboard input (key, unicode char) — password entry only. Still
+        supported when the port is in host mode; the keypad above is what
+        makes the popup usable when it is not."""
         key, char = payload
         if self.state.settings_view != "wifi_password" or self._connecting:
             return
         if key in (KEY_RETURN, KEY_KP_ENTER):
             self._submit_password()
         elif key == KEY_BACKSPACE:
-            self.state.settings_password = self.state.settings_password[:-1]
+            self.keypad.press(KEY_DELETE, 0.0)
+            self._sync_password()
         elif key == KEY_ESCAPE:
             self._show_wifi(rescan=False)
-        elif (char and len(char) == 1 and char.isprintable()
-                and len(self.state.settings_password) < PASSWORD_MAX_CHARS):
-            self.state.settings_password += char
+        elif char and len(char) == 1 and char.isprintable():
+            self.keypad.insert(char)
+            self._sync_password()
 
     def _nav_rows(self) -> list:
         return (self.state.settings_popup_rows
@@ -119,7 +155,7 @@ class SettingsLogic:
             self._was_open = True
             self.state.settings_view = "main"
             self.state.settings_index = 0
-            self.state.settings_password = ""
+            self._reset_keypad()
             self.state.settings_wifi_status = ""
             self._build_rows()
         if self._refreshing:
@@ -151,6 +187,8 @@ class SettingsLogic:
             self._close()
         elif item == "pairing":
             self._toggle_pairing()
+        elif item == "hotspot":
+            self._toggle_hotspot()
         elif item == "preset":
             self._show_presets()
         elif item == "wifi":
@@ -163,6 +201,41 @@ class SettingsLogic:
         self._info["pairing"] = enabled  # optimistic; the next refresh confirms
         self._build_rows()
         self._spawn(self.sysinfo.set_pairing, enabled, name="settings-pairing")
+
+    def _toggle_hotspot(self) -> None:
+        """Raise/drop the pedal's own network. The radio can't be client and
+        AP at once, so turning it ON drops Wi-Fi (and any ssh session on it);
+        turning it OFF hands wlan0 back to NetworkManager, which reconnects."""
+        if self._hotspot_busy:
+            return
+        self._hotspot_busy = True
+        turning_on = not self._info.get("ap", False)
+        self._info["ap"] = turning_on  # optimistic; the next refresh confirms
+        self.state.settings_wifi_status = (
+            "Starting hotspot…" if turning_on else "Stopping hotspot…")
+        self._build_rows()
+        self._spawn(self._apply_hotspot, turning_on, name="settings-hotspot")
+
+    def _apply_hotspot(self, turning_on: bool) -> None:
+        """Worker thread: nmcli hotspot up/down (blocks up to ~60 s)."""
+        try:
+            settings = self.state.config.get("hotspot", {})
+            if turning_on:
+                ok, message = self.sysinfo.ap_start(
+                    settings.get("ssid") or "GuitarPedal",
+                    settings.get("password") or "pedalsetup")
+            else:
+                ok, message = self.sysinfo.ap_stop()
+        except Exception:
+            log.exception("hotspot toggle failed")
+            ok, message = False, "Hotspot failed"
+        if not ok:
+            self._info["ap"] = not turning_on  # roll the optimistic flip back
+        self._hotspot_busy = False
+        self._last_refresh = None  # re-read the real state now
+        if self.state.settings_open:
+            self.state.settings_wifi_status = message
+            self._build_rows()
 
     def _show_presets(self) -> None:
         self.state.settings_presets = [p["name"] for p in self.presets.list_presets()]
@@ -182,28 +255,34 @@ class SettingsLogic:
 
     # --- Wi-Fi setup popup ---------------------------------------------------
 
-    def _show_wifi(self, rescan: bool = True) -> None:
+    def _show_wifi(self, rescan: bool = True, force: bool = True) -> None:
+        """Opening the popup always requests a real sweep (~5 s, on a worker,
+        under "Scanning…"). NM's cached list decays to just the associated AP
+        while connected, so trusting it shows one network or none."""
         self.state.settings_view = "wifi"
         self.state.settings_index = 0
-        self.state.settings_password = ""
+        self._reset_keypad()
         if rescan or not self.state.settings_networks:
             self.state.settings_networks = []
             self.state.settings_wifi_status = "Scanning…"
             self._scanning = True
             self._build_wifi_rows()
-            self._spawn(self._scan_wifi, name="settings-wifi-scan")
+            self._spawn(self._scan_wifi, force, name="settings-wifi-scan")
         else:  # back from password entry: keep the last scan
             self.state.settings_wifi_status = ""
             self._build_wifi_rows()
 
-    def _scan_wifi(self) -> None:
+    def _scan_wifi(self, force: bool = False) -> None:
         """Worker thread: discover networks, then rebuild the popup rows."""
         try:
-            networks = self.sysinfo.wifi_scan()
+            networks = self.sysinfo.wifi_scan(force)
         except Exception:
             log.exception("wifi scan failed")
             networks = None
         self._scanning = False
+        log.info("wifi scan -> %s networks (open=%s view=%s)",
+                 "failed" if networks is None else len(networks),
+                 self.state.settings_open, self.state.settings_view)
         if not (self.state.settings_open and self.state.settings_view == "wifi"):
             return
         self.state.settings_networks = networks or []
@@ -222,7 +301,7 @@ class SettingsLogic:
         if item[0] == "back":
             self._show_main()
         elif item[0] == "rescan":
-            self._show_wifi()
+            self._show_wifi(force=True)
         elif item[0] == "network":
             network = item[1]
             if network["in_use"]:
@@ -236,7 +315,7 @@ class SettingsLogic:
     def _show_password(self, ssid: str) -> None:
         self.state.settings_view = "wifi_password"
         self.state.settings_wifi_ssid = ssid
-        self.state.settings_password = ""
+        self._reset_keypad()
         self.state.settings_wifi_status = ""
 
     def _submit_password(self) -> None:
@@ -313,7 +392,7 @@ class SettingsLogic:
         self.state.settings_open = False
         self.state.settings_view = "main"
         self.state.settings_index = 0
-        self.state.settings_password = ""
+        self._reset_keypad()
         self.state.settings_wifi_status = ""
         log.info("settings closed")
 
@@ -328,6 +407,8 @@ class SettingsLogic:
                 "hostname": self.sysinfo.hostname(),
                 "usb": self.sysinfo.usb_gadget_state(),
             }
+            if not self._hotspot_busy:  # don't clobber the optimistic flip
+                info["ap"] = self.sysinfo.ap_active()
             bluetooth = self.sysinfo.bluetooth_status()
             info["bt_powered"] = bluetooth["powered"]
             info["pairing"] = bluetooth["discoverable"]
@@ -353,7 +434,13 @@ class SettingsLogic:
 
         info = self._info
         ssid = info.get("ssid")
-        wifi = ssid or ("not connected" if "ssid" in info else "…")
+        hosting = info.get("ap", False)
+        # While the AP is up the radio is not a client at all, so showing a
+        # stale SSID here would be a lie.
+        wifi = ("hosting" if hosting
+                else ssid or ("not connected" if "ssid" in info else "…"))
+        hotspot_ssid = self.state.config.get("hotspot", {}).get("ssid", "")
+        hotspot = f"ON  ·  {hotspot_ssid}" if hosting else "OFF"
 
         ble = self.midi.ble_state if self.midi is not None else "off"
         if not info.get("bt_powered", True):
@@ -367,6 +454,7 @@ class SettingsLogic:
         network = f"{info.get('ip') or '—'}  ·  {info.get('hostname') or '…'}"
         self.state.settings_rows = [
             ("Wi-Fi", wifi),
+            ("Hotspot", hotspot),
             ("Bluetooth MIDI", ble),
             ("USB MIDI", usb),
             ("IP / hostname", network),

@@ -21,11 +21,13 @@ from logic.expression import ExpressionLogic
 from logic.menu import MenuLogic
 from logic.midi_in import MidiInLogic
 from logic.power import PowerLogic
+from logic.hotspot import HotspotLogic
 from logic.settings import SettingsLogic
 from midi.engine import MidiEngine
 from state.manager import StateManager
 from ui.renderer import UiRenderer
 from version import FIRMWARE_VERSION
+from web.portal import PortalServer
 from web.server import WebServer
 
 HEARTBEAT_SECONDS = 30.0
@@ -61,6 +63,7 @@ def main() -> int:
     midi = MidiEngine(state, config, on_message=lambda msg: events.put(("midi", msg)))
     ui = UiRenderer(state, on_key=lambda payload: events.put(("key", payload)))
     web = WebServer(state)
+    portal = PortalServer(state)
 
     ui.start()
     midi.start()
@@ -68,6 +71,8 @@ def main() -> int:
     web.start()
     if web.port is not None:
         state.boot_log(f"web editor on port {web.port}")
+        # Joining the pedal's hotspot pops the editor open by itself.
+        portal.start(web.port)
 
     buttons = ButtonReader(config, lambda ev: events.put(("button", ev)))
     buttons.start()
@@ -85,6 +90,7 @@ def main() -> int:
     menu_logic = MenuLogic(config, state, on_action_event=action_logic.on_button_event)
     power_logic = PowerLogic(config, state, on_shutdown=shutdown_machine)
     settings_logic = SettingsLogic(state, midi=midi)
+    hotspot_logic = HotspotLogic(state)
     midi_in_logic = MidiInLogic(config, state)
 
     running = True
@@ -121,7 +127,14 @@ def main() -> int:
                     if state.settings_open:
                         settings_logic.handle_key(payload)
                 elif payload[0] == BUTTON_NUM_POWER:
-                    power_logic.handle_event(payload)
+                    # While typing a Wi-Fi password every footswitch is a
+                    # character, so POWER is the confirm key (and hold-to-
+                    # shutdown is suppressed — no shutting down mid-password).
+                    if (state.settings_open
+                            and state.settings_view == "wifi_password"):
+                        settings_logic.handle_event(payload)
+                    else:
+                        power_logic.handle_event(payload)
                 elif state.settings_open:
                     settings_logic.handle_event(payload)
                 else:
@@ -130,6 +143,7 @@ def main() -> int:
             menu_logic.tick(now)
             power_logic.tick(now)
             settings_logic.tick(now)
+            hotspot_logic.tick(now)
             action_logic.tick(now)
             expression_logic.tick(now)
             midi.tick(now)
@@ -147,7 +161,7 @@ def main() -> int:
 
     buttons.stop()
     expression_input.stop()
-    for module in (web, ui, midi):
+    for module in (portal, web, ui, midi):
         module.stop()
     log.info("goodbye controller")
     return 0

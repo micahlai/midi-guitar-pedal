@@ -161,12 +161,36 @@ class HeaderTextTest(unittest.TestCase):
         self.assertEqual(self.renderer._tempo_text(10.5), "120 BPM")
         self.assertEqual(self.renderer._tempo_text(20.0), "--- BPM")
 
+    def test_tempo_text_empty_when_disabled(self):
+        self.state.tempo_bpm = 120.0
+        self.state.tempo_updated_at = 10.0
+        self.state.config["ui"]["show_tempo"] = False
+        self.assertEqual(self.renderer._tempo_text(10.5), "")
+
     def test_program_label_base_aware(self):
         # Default config: B4 primary is program_change 1 (display base 1),
         # i.e. wire program 0; B1 secondary "SOLO" is program 3 -> wire 2.
         self.assertEqual(self.renderer._program_label(0), "RHYTHM")
         self.assertEqual(self.renderer._program_label(2), "SOLO")
         self.assertIsNone(self.renderer._program_label(90))
+
+
+class TempoDisableTest(unittest.TestCase):
+    def test_clock_gated_by_show_tempo(self):
+        from midi.engine import MidiEngine
+        config = default_config()
+        state = StateManager(config)
+        engine = MidiEngine(state, config)
+        engine._tempo = type("FakeTracker", (), {"clock": lambda self, t: 123.0})()
+        clock = type("Msg", (), {"type": "clock"})()
+
+        config["ui"]["show_tempo"] = False
+        engine._on_incoming(clock)
+        self.assertIsNone(state.tempo_bpm)
+
+        config["ui"]["show_tempo"] = True  # live toggle, no restart
+        engine._on_incoming(clock)
+        self.assertEqual(state.tempo_bpm, 123.0)
 
 
 class PowerShutdownTest(unittest.TestCase):

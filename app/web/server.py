@@ -378,6 +378,10 @@ def apply_settings(config: dict, payload: dict) -> dict:
             config["buttons"], "power_hold_seconds",
             _seconds(payload["power_hold_seconds"], "power_hold_seconds", 0.5, 10.0),
         )
+    if "show_tempo" in payload:
+        updates["show_tempo"] = (
+            config["ui"], "show_tempo", _bool(payload["show_tempo"], "show_tempo"),
+        )
     if "detect_enabled" in payload:
         updates["detect_enabled"] = (
             config["expression"], "detect_enabled",

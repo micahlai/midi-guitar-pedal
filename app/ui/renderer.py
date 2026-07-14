@@ -18,6 +18,7 @@ from pathlib import Path
 from config.model import get_primary, get_secondary_action, get_slot, resolve_color
 from web.images import image_path
 from hardware import battery
+from logic.keypad import KEY_SHIFT, LEGEND
 from hardware.constants import (DISPLAY_HEIGHT, DISPLAY_ROTATION_DEGREES,
                                 DISPLAY_WIDTH)
 from state.manager import StateManager
@@ -266,6 +267,8 @@ class UiRenderer:
             tuple(state.settings_popup_rows),
             state.settings_wifi_ssid,
             state.settings_password,
+            state.settings_password_cursor,
+            state.settings_password_shift,
             state.settings_wifi_status,
             self._tempo_text(now),
             int(now / (FLICKER_PERIOD_S / 2)),
@@ -420,6 +423,8 @@ class UiRenderer:
                              button_num, holds)
 
     def _tempo_text(self, now: float) -> str:
+        if not self.state.config["ui"].get("show_tempo", True):
+            return ""  # readout disabled in device settings
         bpm = self.state.tempo_bpm
         if bpm is None or now - self.state.tempo_updated_at > TEMPO_STALE_SECONDS:
             return "--- BPM"
@@ -469,9 +474,10 @@ class UiRenderer:
         surface.blit(text, text.get_rect(right=right, centery=HEADER_HEIGHT // 2))
         right -= text.get_width() + 48
         tempo = self._tempo_text(time.monotonic())
-        color = theme["disabled"] if tempo.startswith("---") else theme["text"]
-        text = font_small.render(tempo, True, pygame.Color(color))
-        surface.blit(text, text.get_rect(right=right, centery=HEADER_HEIGHT // 2))
+        if tempo:
+            color = theme["disabled"] if tempo.startswith("---") else theme["text"]
+            text = font_small.render(tempo, True, pygame.Color(color))
+            surface.blit(text, text.get_rect(right=right, centery=HEADER_HEIGHT // 2))
 
     def _draw_error_screen(self, pygame, surface, font_big, font_small) -> None:
         """Shown instead of a dead UI thread when _draw raises: the app keeps
@@ -776,30 +782,86 @@ class UiRenderer:
             surface.blit(text, (rect.left + 32, rect.bottom - status_h + 4))
 
     def _draw_password_popup(self, pygame, surface, font_small) -> None:
-        """Password entry for a secured network, typed on a USB keyboard
-        plugged into the Pi (SettingsLogic view "wifi_password")."""
+        """Password entry for a secured network (SettingsLogic view
+        "wifi_password"): the field on the left, the footswitch keypad legend
+        on the right so the mapping is readable while typing on the pedal. A
+        USB keyboard, when the port is in host mode, still works too."""
         theme = self.theme
-        rect = self._popup_frame(pygame, surface, (1100, 320))
-        title = self._fit_text(f"JOIN {self.state.settings_wifi_ssid}",
-                               rect.width - 64, 36)
-        surface.blit(title, (rect.left + 32, rect.top + 24))
+        rect = self._popup_frame(pygame, surface, (1560, 430))
+        text_color = pygame.Color(theme["text"])
+        dim = pygame.Color(theme["disabled"])
+        # Left = the field being typed, right = what each switch does.
+        legend_width = 560
+        left = rect.left + 32
+        field_width = rect.width - legend_width - 64
 
-        box = pygame.Rect(rect.left + 32, rect.top + 84, rect.width - 64, 60)
+        title = self._fit_text(f"JOIN {self.state.settings_wifi_ssid}",
+                               field_width, 36)
+        surface.blit(title, (left, rect.top + 24))
+
+        box = pygame.Rect(left, rect.top + 84, field_width, 64)
         pygame.draw.rect(surface, pygame.Color(theme["panel_background"]), box,
                          border_radius=8)
-        # Show the tail of the password when it outgrows the box.
-        shown = self.state.settings_password
-        text = font_small.render(shown + "_", True, pygame.Color(theme["text"]))
-        while shown and text.get_width() > box.width - 32:
-            shown = shown[1:]
-            text = font_small.render(shown + "_", True, pygame.Color(theme["text"]))
-        surface.blit(text, text.get_rect(left=box.left + 16, centery=box.centery))
+        self._draw_password_field(pygame, surface, font_small, box)
 
-        hint = font_small.render(
-            "Type on a USB keyboard  ·  Enter = connect  ·  Esc = back",
-            True, pygame.Color(theme["disabled"]))
-        surface.blit(hint, (rect.left + 32, box.bottom + 24))
+        hint = font_small.render("tap a key repeatedly to cycle characters",
+                                 True, dim)
+        surface.blit(hint, (left, box.bottom + 20))
+        confirm = font_small.render("POWER = connect  ·  DELETE on empty = back",
+                                    True, dim)
+        surface.blit(confirm, (left, box.bottom + 56))
+
         status = self.state.settings_wifi_status
         if status:
-            text = font_small.render(status, True, pygame.Color(theme["text"]))
-            surface.blit(text, (rect.left + 32, rect.bottom - 52))
+            surface.blit(font_small.render(status, True, text_color),
+                         (left, rect.bottom - 52))
+
+        self._draw_keypad_legend(pygame, surface, font_small,
+                                 rect.right - legend_width, rect.top + 24,
+                                 legend_width - 32)
+
+    def _draw_password_field(self, pygame, surface, font_small, box) -> None:
+        """The password plus a caret at the cursor. When the text outgrows the
+        box we scroll so the caret stays visible — otherwise editing the start
+        of a long passphrase types into empty space."""
+        theme = self.theme
+        color = pygame.Color(theme["text"])
+        password = self.state.settings_password
+        cursor = min(self.state.settings_password_cursor, len(password))
+        inner = box.width - 32
+
+        start = 0
+        while True:
+            shown = password[start:]
+            caret_x = font_small.size(password[start:cursor])[0]
+            if font_small.size(shown)[0] <= inner and caret_x <= inner:
+                break
+            start += 1
+            if start >= len(password):
+                break
+
+        text = font_small.render(password[start:], True, color)
+        surface.blit(text, text.get_rect(left=box.left + 16, centery=box.centery))
+        caret = pygame.Rect(box.left + 16 + caret_x, box.centery - 20, 3, 40)
+        pygame.draw.rect(surface, color, caret)
+
+    def _draw_keypad_legend(self, pygame, surface, font_small, left, top,
+                            width) -> None:
+        """Footswitch -> character map, drawn beside the field. SHIFT lights up
+        while it is latched so the case being typed is never a guess."""
+        theme = self.theme
+        shift_on = self.state.settings_password_shift
+        row_height = 34
+        for index, (button, label) in enumerate(LEGEND):
+            y = top + index * row_height
+            latched = button == KEY_SHIFT and shift_on
+            if latched:  # same highlight the settings rows use for selection
+                row = pygame.Rect(left - 8, y - 4, width, row_height)
+                pygame.draw.rect(surface, pygame.Color(theme["panel_background"]),
+                                 row, border_radius=8)
+                label = f"{label}  ▸ ABC"
+            key = font_small.render(f"B{button}", True,
+                                    pygame.Color(theme["disabled"]))
+            surface.blit(key, (left, y))
+            surface.blit(self._fit_text(label, width - 70, row_height - 6),
+                         (left + 70, y))
