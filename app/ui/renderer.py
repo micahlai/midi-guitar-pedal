@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from config.model import get_primary, get_secondary_action, get_slot, resolve_color
+from logic.expression import map_value
 from web.images import image_path
 from logic import header
 from logic.keypad import KEY_SHIFT, LEGEND_ROWS
@@ -37,6 +38,11 @@ HEADER_HEIGHT = 52  # top strip: 5 configurable items (logic/header.py)
 HEADER_MARGIN = 16  # screen edge -> the far-left/far-right items
 HEADER_GAP = 40  # far item -> the left/right item tucked in beside it
 FLICKER_PERIOD_S = 2.0  # primary+secondary both active -> alternate on_colors
+# Marks the physical pedal position on the expression bar while the effect has
+# not caught up to it yet (expression.select_mode catch/interpolate). The color
+# is ui.theme.expression_pedal; this is the fallback for presets written before
+# that key existed.
+EXPRESSION_POT_COLOR = "#FF2A2A"
 TEMPO_STALE_SECONDS = 2.0  # blank the BPM readout when the clock stops
 SCREENSHOT_PATH = "/tmp/controller-frame.png"
 
@@ -256,6 +262,8 @@ class UiRenderer:
             tuple(sorted(state.effect_states.items())),
             state.expression_detected,
             round(state.expression_value, 3),
+            state.expression_sent_value,
+            state.expression_meeting_pedal,
             state.expression_mode,
             state.shift_held,
             tuple(sorted(state.pressed_buttons)),
@@ -719,25 +727,61 @@ class UiRenderer:
         bar.bottom = exp_rect.bottom - 16
         pygame.draw.rect(surface, pygame.Color(theme["disabled"]), bar, border_radius=8)
 
-        value = self.state.expression_value
+        # The bar LENGTH is the CC value actually being sent — not the pot
+        # position, which differs from it while a catch/interpolate selection
+        # is still meeting the pedal (expression.select_mode). The bar TIP is
+        # the pedal position that value corresponds to, so a reversed
+        # assignment puts the tip in the same place as an unreversed one; only
+        # the anchored end changes (reverse fills downward from the top).
         reverse = bool(action and action.get("reverse"))
-        fill_h = int(bar.height * value)
+        pot_value = map_value(action, self.state.expression_value) if action else None
+        sent_value = self.state.expression_sent_value
+        if sent_value is None:
+            sent_value = pot_value
+        fill_h = int(bar.height * self._value_fraction(action, sent_value))
         if fill_h > 0:
-            if reverse:  # bar grows from the top when reversed
-                fill = pygame.Rect(bar.left, bar.top, bar.width, fill_h)
-            else:
-                fill = pygame.Rect(bar.left, bar.bottom - fill_h, bar.width, fill_h)
-            pygame.draw.rect(surface, self._color(bar_color), fill, border_radius=8)
+            top = bar.top if reverse else bar.bottom - fill_h
+            pygame.draw.rect(surface, self._color(bar_color),
+                             pygame.Rect(bar.left, top, bar.width, fill_h),
+                             border_radius=8)
 
         # Home value marker line (docs/08: value rendered as distance from home).
         if action and action.get("has_home"):
-            span = max(action["value_max"] - action["value_min"], 1)
-            home_frac = (action["home_value"] - action["value_min"]) / span
-            if reverse:
-                home_frac = 1.0 - home_frac
-            y = bar.bottom - int(bar.height * home_frac)
+            y = self._value_y(bar, action, action["home_value"])
             pygame.draw.line(surface, pygame.Color(theme["text"]),
                              (bar.left - 8, y), (bar.right + 8, y), width=3)
+
+        # Where the physical pedal is, while the effect has not met it yet — the
+        # player needs to see how far to sweep before the effect starts moving.
+        # Only until they meet: past that the effect tracks the pedal, and the
+        # marker would just be a second line riding the tip of the bar.
+        if (self.state.expression_meeting_pedal
+                and pot_value is not None and pot_value != sent_value):
+            y = self._value_y(bar, action, pot_value)
+            marker = theme.get("expression_pedal") or EXPRESSION_POT_COLOR
+            pygame.draw.rect(surface, pygame.Color(marker),
+                             pygame.Rect(bar.left - 4, y - 2, bar.width + 8, 5),
+                             border_radius=2)
+
+    @staticmethod
+    def _value_fraction(action: dict | None, value: int | None) -> float:
+        """CC value -> 0.0-1.0 of the bar's length (how much effect is being
+        sent). Independent of reverse: reverse changes which end of the pedal's
+        travel produces the value, not how much value there is."""
+        if action is None or value is None:
+            return 0.0
+        low, high = action["value_min"], action["value_max"]
+        span = max(high - low, 1)
+        return max(0.0, min(1.0, (value - low) / span))
+
+    def _value_y(self, bar, action: dict | None, value: int | None) -> int:
+        """CC value -> the y of the pedal position that produces it. Reversed,
+        a high value sits at the bottom of the bar (heel down) rather than the
+        top, which is where the fill's tip lands too."""
+        fraction = self._value_fraction(action, value)
+        if action and action.get("reverse"):
+            fraction = 1.0 - fraction
+        return bar.bottom - int(bar.height * fraction)
 
     def _draw_settings(self, pygame, surface, font_big, font_small) -> None:
         theme = self.theme

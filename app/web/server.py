@@ -42,6 +42,7 @@ from config.loader import save_config
 from logic import header
 from web import images
 from config.model import ACTION_TYPES, PALETTE_SIZE, get_menu, iter_expression_actions
+from logic.expression import ACTION_DEFAULTS, SELECT_MODES
 from state.manager import StateManager
 
 log = logging.getLogger("controller.web")
@@ -180,6 +181,19 @@ def validate_action(raw, allowed_types, secondary: bool, pc_base: int = 0) -> di
         action["reverse"] = _bool(raw.get("reverse"), "reverse")
         action["has_home"] = _bool(raw.get("has_home"), "has_home")
         action["home_value"] = _midi7(raw.get("home_value"), "home_value")
+        # How this effect meets the pedal when selected, and how fast it walks
+        # home when left — per-effect, so they travel with the preset.
+        select_mode = raw.get("select_mode", ACTION_DEFAULTS["select_mode"])
+        if select_mode not in SELECT_MODES:
+            raise ValueError("select_mode must be one of %s" % ", ".join(SELECT_MODES))
+        action["select_mode"] = select_mode
+        for name, lo, hi in (
+            ("return_alpha", 0.01, 1.0),
+            ("return_stop_threshold", 0.0, 5.0),
+            ("select_alpha", 0.01, 1.0),
+            ("select_stop_threshold", 0.0, 5.0),
+        ):
+            action[name] = _seconds(raw.get(name, ACTION_DEFAULTS[name]), name, lo, hi)
         # The pot's fallback assignment when no expression button is selected;
         # at most one across the whole config (enforced on save).
         action["is_default"] = _bool(raw.get("is_default", False), "is_default")
@@ -363,7 +377,8 @@ def apply_settings(config: dict, payload: dict) -> dict:
         updates["expression_panel_width_ratio"] = (
             config["ui"], "expression_panel_width_ratio", round(float(value), 3),
         )
-    for theme_key in ("background", "panel_background", "text", "disabled"):
+    for theme_key in ("background", "panel_background", "text", "disabled",
+                      "expression_pedal"):
         name = f"theme_{theme_key}"
         if name in payload:
             updates[name] = (
@@ -404,11 +419,11 @@ def apply_settings(config: dict, payload: dict) -> dict:
         updates["header"] = (
             config["ui"], "header", _header_slots(payload["header"]),
         )
-    if "detect_enabled" in payload:
-        updates["detect_enabled"] = (
-            config["expression"], "detect_enabled",
-            _bool(payload["detect_enabled"], "detect_enabled"),
-        )
+    for name in ("detect_enabled", "retain_pedal_value"):
+        if name in payload:
+            updates[name] = (config["expression"], name, _bool(payload[name], name))
+    # select_mode and the return/select speeds are per-effect (parsed in
+    # _action_from_payload), not device settings.
     for name, lo, hi in (
         ("send_deadband", 0, 16),
         ("poll_interval_ms", 5, 100),
@@ -416,12 +431,6 @@ def apply_settings(config: dict, payload: dict) -> dict:
     ):
         if name in payload:
             updates[name] = (config["expression"], name, _int(payload[name], name, lo, hi))
-    for name, lo, hi in (
-        ("return_alpha", 0.01, 1.0),
-        ("return_stop_threshold", 0.0, 5.0),
-    ):
-        if name in payload:
-            updates[name] = (config["expression"], name, _seconds(payload[name], name, lo, hi))
 
     if not updates:
         raise ValueError("no editable settings in request")

@@ -92,6 +92,7 @@
   .field input:focus, .field select:focus { outline: 1px solid var(--accent); }
   .check { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; font-size: 12px; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .row2 > .wide { grid-column: 1 / -1; }  /* a field that takes the whole row */
   .btn {
     background: var(--panel2); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer;
@@ -320,6 +321,7 @@
           <div class="field"><label>Panel background</label><input type="color" id="set-th-panel"></div>
           <div class="field"><label>Text</label><input type="color" id="set-th-text"></div>
           <div class="field"><label>Dimmed text</label><input type="color" id="set-th-dim"></div>
+          <div class="field"><label>Pedal position marker</label><input type="color" id="set-th-exp"></div>
         </div>
         <h2>Live Status</h2>
         <div id="statusbox">connecting…</div>
@@ -368,7 +370,7 @@
           </div>
         </div>
         <h2>Device — Expression Pedal</h2>
-        <div class="check"><input type="checkbox" id="set-detect"><label for="set-detect">Detect pin enabled</label></div>
+        <div class="check"><input type="checkbox" id="set-retain"><label for="set-retain">Retain pedal value when unplugged</label></div>
         <div class="row2">
           <div class="field">
             <label>Send deadband</label>
@@ -379,18 +381,12 @@
             <input type="number" id="set-poll" min="5" max="100" step="1">
           </div>
           <div class="field">
-            <label>Home-return alpha</label>
-            <input type="number" id="set-ralpha" min="0.01" max="1" step="0.01">
-          </div>
-          <div class="field">
-            <label>Return interval (ms)</label>
+            <label>Return/glide interval (ms)</label>
             <input type="number" id="set-rint" min="10" max="200" step="5">
           </div>
-          <div class="field">
-            <label>Return stop threshold</label>
-            <input type="number" id="set-rstop" min="0" max="5" step="0.1">
-          </div>
         </div>
+        <div class="hint">How each effect meets the pedal when selected, and how fast it
+          returns home, is set per expression effect in the menu editor.</div>
         <div class="hint">Button and expression hardware settings apply after a restart.</div>
       </div>
     </div>
@@ -416,10 +412,30 @@ const TEMPLATES = {
   expression_pedal: { type: "expression_pedal", midi_channel: 1, cc_number: 7,
     off_color: "#303030", on_color: "#FFCC00", value_min: 0, value_max: 127,
     reverse: false, has_home: false, home_value: 0, is_default: false,
+    select_mode: "snap", select_alpha: 0.15, select_stop_threshold: 0.5,
+    return_alpha: 0.15, return_stop_threshold: 0.5,
     label: "", image_asset_id: null },
   nothing: { type: "nothing", label: "", color: "#1A1A1A" },
 };
-// [key, label, kind]; kind: chan | midi7 | pc | color | bool | secs
+// What a newly selected expression effect does when the pedal is not where that
+// effect's CC was left.
+const SELECT_MODES = [
+  ["catch", "When current value reached"],
+  ["interpolate", "Interpolate to pedal value"],
+  ["snap", "Snap to pedal value"],
+];
+// Numeric field kinds -> input attributes. pc's bounds shift with
+// program_display_base, so it is filled in at render time.
+const NUMERIC_KINDS = {
+  chan: { min: 1, max: 16, step: 1 },
+  midi7: { min: 0, max: 127, step: 1 },
+  secs: { min: 0.1, max: 10, step: 0.1, float: true },
+  alpha: { min: 0.01, max: 1, step: 0.01, float: true },
+  thresh: { min: 0, max: 5, step: 0.1, float: true },
+  pc: { step: 1 },
+};
+// [key, label, kind]; kind: chan | midi7 | pc | color | bool | secs | alpha |
+// thresh | choice:<name>
 const FIELDS = {
   effect_cc: [
     ["midi_channel", "MIDI channel", "chan"], ["cc_number", "Note number", "midi7"],
@@ -440,11 +456,30 @@ const FIELDS = {
     ["off_color", "Off color", "color"], ["on_color", "On color", "color"],
     ["value_min", "Value min", "midi7"], ["value_max", "Value max", "midi7"],
     ["reverse", "Reverse direction", "bool"],
-    ["has_home", "Return to home value", "bool"], ["home_value", "Home value", "midi7"],
+    ["has_home", "Return to home value", "bool"],
+    // Home value gets a row of its own; its speed/threshold share the next.
+    // All three appear only when the home-return is on.
+    ["home_value", "Home value", "midi7"],
+    ["return_alpha", "Return-to-home speed", "alpha"],
+    ["return_stop_threshold", "Return-to-home threshold", "thresh"],
+    // Likewise the mode gets its own row, and only interpolation has a speed.
+    ["select_mode", "Send on selection", "choice"],
+    ["select_alpha", "On-selection speed", "alpha"],
+    ["select_stop_threshold", "On-selection threshold", "thresh"],
     ["is_default", "Default expression (pot uses this when no expression button is selected — only one allowed)", "bool"],
   ],
   nothing: [["color", "Color", "color"]],
 };
+// Fields that take a whole row of the two-column grid rather than half of one.
+const WIDE_FIELDS = new Set(["home_value", "select_mode"]);
+// Shown only while the setting they belong to is switched on.
+const HOME_FIELDS = new Set(["home_value", "return_alpha", "return_stop_threshold"]);
+const INTERPOLATE_FIELDS = new Set(["select_alpha", "select_stop_threshold"]);
+
+function wide(key, el) {
+  if (WIDE_FIELDS.has(key)) el.classList.add("wide");
+  return el;
+}
 
 let config = null;
 let currentTab = "overview"; // "overview" | "global" | menu id (number)
@@ -985,13 +1020,21 @@ function actionForm(n, role) {
   for (const [key, name, kind] of FIELDS[action.type]) {
     if (role === "secondary" && key === "off_color") continue;
     if (role === "primary" && key === "color_duration") continue;
+    // The home value and its speed/threshold mean nothing to an effect that
+    // never returns home; the on-selection speed/threshold only drive the
+    // interpolate mode. Both groups appear as their owner is switched on
+    // (setField rebuilds the card for has_home and select_mode).
+    if (HOME_FIELDS.has(key) && !action.has_home) continue;
+    if (INTERPOLATE_FIELDS.has(key)
+        && (action.select_mode ?? TEMPLATES[action.type].select_mode) !== "interpolate") continue;
     if (kind === "bool") {
       const div = document.createElement("div");
       div.className = "check";
       const cb = document.createElement("input");
       cb.type = "checkbox"; cb.checked = !!action[key];
       cb.id = `cb-${n}-${role}-${key}`;
-      cb.onchange = () => setField(n, role, key, cb.checked);
+      // Turning the home-return on or off shows/hides its speed fields.
+      cb.onchange = () => setField(n, role, key, cb.checked, key === "has_home");
       const lb = document.createElement("label");
       lb.htmlFor = cb.id; lb.textContent = name;
       div.append(cb, lb);
@@ -1002,18 +1045,32 @@ function actionForm(n, role) {
       pairs.appendChild(field(name, colorPicker(n, role, key, action)));
       continue;
     }
+    if (kind === "choice") {  // select_mode is the only one so far
+      const sel = document.createElement("select");
+      for (const [value, text] of SELECT_MODES) {
+        const opt = document.createElement("option");
+        opt.value = value; opt.textContent = text;
+        sel.appendChild(opt);
+      }
+      sel.value = action[key] ?? TEMPLATES[action.type][key];
+      // Rebuilds the card: interpolate brings its speed/threshold with it.
+      sel.onchange = () => setField(n, role, key, sel.value, true);
+      pairs.appendChild(wide(key, field(name, sel)));
+      continue;
+    }
     const input = document.createElement("input");
     const base = config.midi.program_display_base;
+    const spec = NUMERIC_KINDS[kind];
     input.type = "number";
-    input.min = kind === "secs" ? 0.1 : kind === "chan" ? 1 : kind === "pc" ? base : 0;
-    input.max = kind === "secs" ? 10 : kind === "chan" ? 16 : kind === "pc" ? 127 + base : 127;
-    if (kind === "secs") input.step = 0.1;
-    // Pre-color_duration configs lack the field; show the server default.
-    input.value = action[key] ?? (kind === "secs" ? 1 : "");
+    input.min = kind === "pc" ? base : spec.min;
+    input.max = kind === "pc" ? 127 + base : spec.max;
+    input.step = spec.step;
+    // Configs written before a field existed lack it; show the template default.
+    input.value = action[key] ?? TEMPLATES[action.type][key] ?? "";
     // Note/program edits rebuild the card so duplicate warnings refresh.
     const structural = key === "cc_number" || key === "program_number";
     input.onchange = () => {
-      const v = kind === "secs" ? parseFloat(input.value) : parseInt(input.value, 10);
+      const v = spec.float ? parseFloat(input.value) : parseInt(input.value, 10);
       if (!isNaN(v)) setField(n, role, key, v, structural);
     };
     // Notes are entered as numbers but shown with their name too (C3 = 60).
@@ -1027,7 +1084,7 @@ function actionForm(n, role) {
           ? name : `${name} (${noteName(v)})`;
       };
     }
-    pairs.appendChild(f);
+    pairs.appendChild(wide(key, f));
     if (isNote) {
       const next = nextAvailableNote();
       const row = document.createElement("div");
@@ -1446,12 +1503,12 @@ const SETTING_PATHS = {
   theme_panel_background: ["ui", "theme", "panel_background"],
   theme_text: ["ui", "theme", "text"],
   theme_disabled: ["ui", "theme", "disabled"],
+  theme_expression_pedal: ["ui", "theme", "expression_pedal"],
   device_name: ["device", "name"],
   web_port: ["web", "port"],
   debounce_ms: ["buttons"], power_double_press_ms: ["buttons"], power_hold_seconds: ["buttons"],
   detect_enabled: ["expression"], send_deadband: ["expression"], poll_interval_ms: ["expression"],
-  return_alpha: ["expression"], return_interval_ms: ["expression"],
-  return_stop_threshold: ["expression"],
+  return_interval_ms: ["expression"], retain_pedal_value: ["expression"],
 };
 
 function applySavedSetting(key, value) {
@@ -1529,6 +1586,7 @@ function initSettings() {
   $("set-th-panel").value = config.ui.theme.panel_background;
   $("set-th-text").value = config.ui.theme.text;
   $("set-th-dim").value = config.ui.theme.disabled;
+  $("set-th-exp").value = config.ui.theme.expression_pedal || "#FF2A2A";
   // Device-scoped.
   $("set-devname").value = config.device.name;
   $("set-webport").value = config.web.port;
@@ -1538,12 +1596,10 @@ function initSettings() {
   $("set-debounce").value = config.buttons.debounce_ms;
   $("set-dpress").value = config.buttons.power_double_press_ms;
   $("set-phold").value = config.buttons.power_hold_seconds;
-  $("set-detect").checked = config.expression.detect_enabled;
+  $("set-retain").checked = !!config.expression.retain_pedal_value;
   $("set-deadband").value = config.expression.send_deadband;
   $("set-poll").value = config.expression.poll_interval_ms;
-  $("set-ralpha").value = config.expression.return_alpha;
   $("set-rint").value = config.expression.return_interval_ms;
-  $("set-rstop").value = config.expression.return_stop_threshold;
 
   $("set-preset-name").onchange = async () => {
     await saveSettings({ preset_name: $("set-preset-name").value.trim() });
@@ -1559,6 +1615,7 @@ function initSettings() {
   bindColor("set-th-panel", "theme_panel_background");
   bindColor("set-th-text", "theme_text");
   bindColor("set-th-dim", "theme_disabled");
+  bindColor("set-th-exp", "theme_expression_pedal");
   // Changing the base re-numbers every stored program server-side, so pull
   // the whole config back down and re-render.
   $("set-pcbase").onchange = async () => {
@@ -1577,12 +1634,10 @@ function initSettings() {
   bindNumber("set-debounce", "debounce_ms", v => parseInt(v, 10));
   bindNumber("set-dpress", "power_double_press_ms", v => parseInt(v, 10));
   bindNumber("set-phold", "power_hold_seconds", parseFloat);
-  bindCheck("set-detect", "detect_enabled");
+  bindCheck("set-retain", "retain_pedal_value");
   bindNumber("set-deadband", "send_deadband", v => parseInt(v, 10));
   bindNumber("set-poll", "poll_interval_ms", v => parseInt(v, 10));
-  bindNumber("set-ralpha", "return_alpha", parseFloat);
   bindNumber("set-rint", "return_interval_ms", v => parseInt(v, 10));
-  bindNumber("set-rstop", "return_stop_threshold", parseFloat);
 }
 
 async function saveSettings(payload) {

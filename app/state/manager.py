@@ -19,6 +19,16 @@ class StateManager:
         self.effect_states: dict[tuple[int, int], bool] = {}
         self.expression_detected = False
         self.expression_value = 0.0  # normalized pot position 0.0-1.0
+        # Last CC value ExpressionLogic sent for the ACTIVE mode — what the UI
+        # bar shows. It only differs from the pot's mapped value while a catch
+        # or interpolate selection is still meeting the pedal (expression.
+        # select_mode); None until the mode has sent anything.
+        self.expression_sent_value: int | None = None
+        # True while a just-selected effect is still meeting the pedal (catch
+        # or interpolate). The UI's red pedal marker shows only then — once
+        # they meet, the effect tracks the pedal and there is nothing to show
+        # until another effect is selected.
+        self.expression_meeting_pedal = False
         # (menu_id, button_num, "primary"|"secondary") of the active
         # expression_pedal assignment.
         self.expression_mode: tuple[int, int, str] | None = None

@@ -185,6 +185,168 @@ class ExpressionLogicTest(unittest.TestCase):
                         f"not monotonically decreasing: {wah_values}")
         self.assertNotIn((1, 11), self.logic._returns)
 
+    def test_retained_value_keeps_sending_while_unplugged(self):
+        self.config["expression"]["retain_pedal_value"] = True
+        self.state.expression_mode = (1, 6, "primary")  # VOLUME cc 7
+        self.state.expression_detected = False
+        self.state.expression_value = 0.5  # ADC froze it here at unplug
+        self.logic.tick(0.0)
+        self.assertEqual(self.midi.sent, [("cc", 1, 7, 64)])
+
+
+class SelectModeTest(unittest.TestCase):
+    """Milestone 17: what a newly selected expression effect does when the pot
+    is not where that effect's CC was left. WAH (button 7, cc 11, home 0) and
+    VOLUME (button 6, cc 7) are the default config's expression assignments."""
+
+    def setUp(self):
+        self.config = default_config()
+        self.state = StateManager(self.config)
+        self.state.expression_detected = True
+        self.midi = FakeMidi()
+        self.logic = ExpressionLogic(self.config, self.state, self.midi)
+
+    def set_select_mode(self, mode):
+        """select_mode is per-effect now, so set it on both of the default
+        config's expression assignments (VOLUME on 6, WAH on 7)."""
+        for button in ("6", "7"):
+            self.config["menus"][0]["slots"][button]["primary"]["select_mode"] = mode
+
+    def wah_sends(self):
+        return [v for (k, ch, cc, v) in self.midi.sent if k == "cc" and cc == 11]
+
+    def leave_wah_returning_home(self):
+        """WAH at 127, then switch away — it starts walking home. Stop partway,
+        so re-selecting it has to meet a value that is neither 127 nor home."""
+        self.state.expression_mode = (1, 7, "primary")  # WAH cc 11
+        self.state.expression_value = 1.0
+        self.logic.tick(0.0)
+        self.assertEqual(self.midi.sent[-1], ("cc", 1, 11, 127))
+        self.logic.set_mode((1, 6, "primary"))  # -> VOLUME, WAH returns home
+        t = 0.0
+        for _ in range(5):
+            t += 0.03
+            self.logic.tick(t)
+        frozen = self.logic._returns[(1, 11)]["current"]
+        self.assertTrue(0 < frozen < 127, frozen)
+        self.midi.sent.clear()
+        return t, frozen
+
+    def test_catch_holds_effect_until_pot_sweeps_onto_it(self):
+        self.set_select_mode("catch")
+        t, frozen = self.leave_wah_returning_home()
+        self.logic.set_mode((1, 7, "primary"))  # back to WAH
+        # The home-return stops where it was; that frozen value is the target.
+        self.assertNotIn((1, 11), self.logic._returns)
+        self.assertEqual(self.logic._pending["target"], round(frozen))
+
+        # Pot is still at the top: WAH must not jump back up to it.
+        for _ in range(5):
+            t += 0.03
+            self.logic.tick(t)
+        self.assertEqual(self.wah_sends(), [])
+
+        # Sweep the pot down past the frozen value -> WAH catches and tracks.
+        for value in (0.9, 0.7, 0.5, 0.3):
+            self.state.expression_value = value
+            t += 0.03
+            self.logic.tick(t)
+        sent = self.wah_sends()
+        self.assertTrue(sent, "WAH never caught the pot")
+        self.assertLessEqual(sent[0], round(frozen))  # no upward jump
+        self.assertEqual(sent[-1], 38)  # pot 0.3 -> tracking exactly
+
+    def test_interpolate_glides_effect_to_the_pot(self):
+        self.set_select_mode("interpolate")
+        t, frozen = self.leave_wah_returning_home()
+        self.state.expression_value = 0.0  # pot parked at the bottom -> WAH 0
+        self.logic.set_mode((1, 7, "primary"))
+        for _ in range(200):
+            t += 0.03
+            self.logic.tick(t)
+        sent = self.wah_sends()
+        self.assertTrue(sent)
+        self.assertLess(sent[0], frozen)  # started from where it was left
+        self.assertEqual(sent[-1], 0)  # arrived at the pot
+        self.assertTrue(all(a >= b for a, b in zip(sent, sent[1:])),
+                        f"not monotonic: {sent}")
+        self.assertIsNone(self.logic._pending)  # now tracking the pot
+
+    def test_snap_jumps_straight_to_the_pot(self):
+        self.set_select_mode("snap")
+        t, _frozen = self.leave_wah_returning_home()
+        self.state.expression_value = 0.0
+        self.logic.set_mode((1, 7, "primary"))
+        self.logic.tick(t + 0.03)
+        self.assertEqual(self.wah_sends()[0], 0)  # one send, straight to the pot
+
+    def test_sent_value_published_for_the_ui_bar(self):
+        # The device bar draws expression_sent_value, and marks the pot in red
+        # while the two disagree — so the sent value must stay at the held
+        # value, not the pot's, until the effect catches up.
+        self.set_select_mode("catch")
+        t, frozen = self.leave_wah_returning_home()
+        self.logic.set_mode((1, 7, "primary"))
+        self.assertEqual(self.state.expression_sent_value, round(frozen))
+        for _ in range(5):  # pot still at the top, WAH held
+            t += 0.03
+            self.logic.tick(t)
+        self.assertEqual(self.state.expression_sent_value, round(frozen))
+        self.state.expression_value = 0.0  # sweep past it -> caught, tracking
+        self.logic.tick(t + 0.03)
+        self.assertEqual(self.state.expression_sent_value, 0)
+
+    def test_red_pedal_marker_shows_only_until_the_effect_meets_the_pedal(self):
+        self.set_select_mode("catch")
+        t, _frozen = self.leave_wah_returning_home()
+        self.assertFalse(self.state.expression_meeting_pedal)
+        self.logic.set_mode((1, 7, "primary"))  # back to WAH, pot at the top
+        self.assertTrue(self.state.expression_meeting_pedal)
+
+        self.state.expression_value = 0.0  # sweep past the held value -> caught
+        t += 0.03
+        self.logic.tick(t)
+        self.assertFalse(self.state.expression_meeting_pedal)
+        # Sweeping around afterwards must not bring the marker back: the effect
+        # tracks the pedal now, and only a new selection can part them again.
+        for value in (0.4, 0.8, 0.2):
+            self.state.expression_value = value
+            t += 0.03
+            self.logic.tick(t)
+            self.assertFalse(self.state.expression_meeting_pedal)
+
+    def test_snap_never_shows_the_red_pedal_marker(self):
+        self.set_select_mode("snap")
+        t, _frozen = self.leave_wah_returning_home()
+        self.logic.set_mode((1, 7, "primary"))
+        self.assertFalse(self.state.expression_meeting_pedal)
+        self.logic.tick(t + 0.03)
+        self.assertFalse(self.state.expression_meeting_pedal)
+
+    def test_each_effect_carries_its_own_select_mode_and_speeds(self):
+        volume = self.config["menus"][0]["slots"]["6"]["primary"]
+        wah = self.config["menus"][0]["slots"]["7"]["primary"]
+        volume["select_mode"] = "snap"
+        wah["select_mode"] = "catch"
+        wah["return_alpha"] = 0.5  # WAH walks home faster than the default
+
+        t, frozen = self.leave_wah_returning_home()
+        # WAH's own return_alpha drove that return, not a device-wide one.
+        self.assertEqual(self.logic._returns[(1, 11)]["alpha"], 0.5)
+
+        self.logic.set_mode((1, 7, "primary"))  # WAH: catch
+        self.assertTrue(self.state.expression_meeting_pedal)
+        self.logic.set_mode((1, 6, "primary"))  # VOLUME: snap
+        self.assertFalse(self.state.expression_meeting_pedal)
+
+    def test_selecting_an_untouched_effect_always_snaps(self):
+        # Nothing has been sent on VOLUME's CC, so there is no value to meet.
+        self.set_select_mode("catch")
+        self.state.expression_value = 1.0
+        self.logic.set_mode((1, 6, "primary"))  # VOLUME cc 7
+        self.logic.tick(0.0)
+        self.assertEqual(self.midi.sent, [("cc", 1, 7, 127)])
+
 
 if __name__ == "__main__":
     unittest.main()

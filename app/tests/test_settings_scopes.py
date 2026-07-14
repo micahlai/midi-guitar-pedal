@@ -110,11 +110,17 @@ class ApplySettingsTest(unittest.TestCase):
             "default_channel": 4,
             "theme_background": "#101010",
             "theme_text": "#eeeeee",
+            "theme_expression_pedal": "#00ff00",
         })
         self.assertEqual(self.config["midi"]["default_channel"], 4)
         self.assertEqual(self.config["ui"]["theme"]["background"], "#101010")
         self.assertEqual(self.config["ui"]["theme"]["text"], "#EEEEEE")
         self.assertEqual(applied["theme_text"], "#EEEEEE")
+        # The expression bar's pedal marker travels with the preset like every
+        # other theme color — strip_device_settings must not take it away.
+        self.assertEqual(self.config["ui"]["theme"]["expression_pedal"], "#00FF00")
+        strip_device_settings(self.config)
+        self.assertEqual(self.config["ui"]["theme"]["expression_pedal"], "#00FF00")
 
     def test_device_scoped_fields(self):
         apply_settings(self.config, {
@@ -126,9 +132,8 @@ class ApplySettingsTest(unittest.TestCase):
             "detect_enabled": False,
             "send_deadband": 2,
             "poll_interval_ms": 20,
-            "return_alpha": 0.2,
             "return_interval_ms": 40,
-            "return_stop_threshold": 1.0,
+            "retain_pedal_value": True,
         })
         self.assertEqual(self.config["device"]["name"], "Stage Board")
         self.assertEqual(self.config["web"]["port"], 9000)
@@ -136,13 +141,25 @@ class ApplySettingsTest(unittest.TestCase):
         self.assertEqual(self.config["buttons"]["power_hold_seconds"], 4.0)
         self.assertFalse(self.config["expression"]["detect_enabled"])
         self.assertEqual(self.config["expression"]["poll_interval_ms"], 20)
-        self.assertEqual(self.config["expression"]["return_alpha"], 0.2)
+        self.assertEqual(self.config["expression"]["return_interval_ms"], 40)
+        self.assertTrue(self.config["expression"]["retain_pedal_value"])
+
+    def test_per_effect_expression_settings_are_not_device_settings(self):
+        # They live on the action (and so travel with the preset); the settings
+        # endpoint must not quietly accept them as device-wide values.
+        for name, value in (("select_mode", "catch"), ("select_alpha", 0.3),
+                            ("return_alpha", 0.2), ("return_stop_threshold", 1.0),
+                            ("select_stop_threshold", 1.0)):
+            with self.assertRaises(ValueError, msg=name):
+                apply_settings(default_config(), {name: value})
+            self.assertNotIn(name, default_config()["expression"])
 
     def test_invalid_values_rejected(self):
         bad = [
             {"default_channel": 17},
             {"theme_background": "palette:1"},  # theme colors are literal only
             {"theme_text": "red"},
+            {"theme_expression_pedal": "palette:2"},  # theme colors are literal only
             {"device_name": "   "},
             {"device_name": 7},
             {"web_port": 80},
@@ -154,8 +171,7 @@ class ApplySettingsTest(unittest.TestCase):
             {"header": ["bpm", "bpm", None, None, None]},  # one item, one place
             {"send_deadband": -1},
             {"poll_interval_ms": 1},
-            {"return_alpha": 0.0},
-            {"return_stop_threshold": 9},
+            {"retain_pedal_value": "yes"},
         ]
         for payload in bad:
             with self.assertRaises(ValueError, msg=payload):

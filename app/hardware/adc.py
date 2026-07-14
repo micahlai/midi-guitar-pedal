@@ -28,6 +28,7 @@ SPI_HZ = 1_350_000
 
 class ExpressionInput:
     def __init__(self, config: dict, state):
+        self.config = config
         self.state = state
         self.poll_s = config["expression"]["poll_interval_ms"] / 1000.0
         self.detect_enabled = config["expression"]["detect_enabled"]
@@ -100,10 +101,16 @@ class ExpressionInput:
             except OSError as e:
                 log.error("ADC read failed, stopping: %s", e)
                 return
-            value = raw / ADC_MAX
-            if self._smoothed is None:
-                self._smoothed = value
-            else:
-                self._smoothed += SMOOTHING_ALPHA * (value - self._smoothed)
-            self.state.expression_value = self._smoothed
+            # Unplugged, the pot input floats and reads noise. With
+            # retain_pedal_value the last reading stands instead — the effect
+            # the pedal was driving stays where the player left it. Read live
+            # so the web toggle takes effect without a restart.
+            if (self.state.expression_detected
+                    or not self.config["expression"].get("retain_pedal_value")):
+                value = raw / ADC_MAX
+                if self._smoothed is None:
+                    self._smoothed = value
+                else:
+                    self._smoothed += SMOOTHING_ALPHA * (value - self._smoothed)
+                self.state.expression_value = self._smoothed
             time.sleep(self.poll_s)

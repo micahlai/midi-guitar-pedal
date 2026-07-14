@@ -34,6 +34,9 @@ DEFAULT_CONFIG = {
             "panel_background": "#111111",
             "text": "#FFFFFF",
             "disabled": "#333333",
+            # Marks the pedal's position on the expression bar while a newly
+            # selected effect is still catching/gliding up to it.
+            "expression_pedal": "#FF2A2A",
         },
     },
     "buttons": {
@@ -68,9 +71,14 @@ DEFAULT_CONFIG = {
         "panel_label": "EXP",
         "send_deadband": 1,
         "poll_interval_ms": 10,
-        "return_alpha": 0.15,
+        # How often a home-return or an on-selection glide may step. How FAST
+        # they move — and whether an effect catches, glides or snaps at all —
+        # is per-action (logic/expression.py ACTION_DEFAULTS), so it travels
+        # with the preset.
         "return_interval_ms": 30,
-        "return_stop_threshold": 0.5,
+        # Pedal unplugged (detect pin off): keep the last pot value instead of
+        # tracking the now-floating ADC input.
+        "retain_pedal_value": False,
     },
     "menus": [
         {
@@ -124,6 +132,9 @@ DEFAULT_CONFIG = {
                     "label": "VOLUME", "image_asset_id": None,
                     "value_min": 0, "value_max": 127, "reverse": False,
                     "has_home": False, "home_value": 0,
+                    "select_mode": "snap", "select_alpha": 0.15,
+                    "select_stop_threshold": 0.5,
+                    "return_alpha": 0.15, "return_stop_threshold": 0.5,
                 }},
                 "7": {"primary": {
                     "type": "expression_pedal", "midi_channel": 1, "cc_number": 11,
@@ -131,6 +142,9 @@ DEFAULT_CONFIG = {
                     "label": "WAH", "image_asset_id": None,
                     "value_min": 0, "value_max": 127, "reverse": False,
                     "has_home": True, "home_value": 0,
+                    "select_mode": "snap", "select_alpha": 0.15,
+                    "select_stop_threshold": 0.5,
+                    "return_alpha": 0.15, "return_stop_threshold": 0.5,
                 }},
                 "8": {"primary": {
                     "type": "nothing", "label": "", "color": "#1A1A1A",
@@ -174,9 +188,8 @@ DEVICE_SETTING_PATHS = (
     ("expression", "detect_enabled"),
     ("expression", "send_deadband"),
     ("expression", "poll_interval_ms"),
-    ("expression", "return_alpha"),
     ("expression", "return_interval_ms"),
-    ("expression", "return_stop_threshold"),
+    ("expression", "retain_pedal_value"),
     ("ui", "header"),
     ("ui", "screen_width"),
     ("ui", "screen_height"),
