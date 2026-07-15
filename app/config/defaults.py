@@ -80,6 +80,9 @@ DEFAULT_CONFIG = {
         # tracking the now-floating ADC input.
         "retain_pedal_value": False,
     },
+    # Five selection-group slots (logic/groups.py). Only the name is editable;
+    # an action_cc points at one by index (1-5) to latch with it. Empty = unused.
+    "selection_groups": ["", "", "", "", ""],
     "menus": [
         {
             "id": 1,

@@ -144,6 +144,22 @@ class ApplySettingsTest(unittest.TestCase):
         self.assertEqual(self.config["expression"]["return_interval_ms"], 40)
         self.assertTrue(self.config["expression"]["retain_pedal_value"])
 
+    def test_selection_group_names_are_preset_scoped(self):
+        apply_settings(self.config, {
+            "selection_groups": ["Pad Key", "  Amp  ", "", "", ""],
+        })
+        self.assertEqual(self.config["selection_groups"][0], "Pad Key")
+        self.assertEqual(self.config["selection_groups"][1], "Amp")  # trimmed
+        strip_device_settings(self.config)  # names travel with the preset
+        self.assertEqual(self.config["selection_groups"][0], "Pad Key")
+
+    def test_bad_selection_group_names_rejected(self):
+        for value in (["one", "two"],  # wrong length: the 5 slots always exist
+                      ["a", "b", "c", "d", 5],
+                      ["x" * 25, "", "", "", ""]):
+            with self.assertRaises(ValueError, msg=value):
+                apply_settings(default_config(), {"selection_groups": value})
+
     def test_per_effect_expression_settings_are_not_device_settings(self):
         # They live on the action (and so travel with the preset); the settings
         # endpoint must not quietly accept them as device-wide values.

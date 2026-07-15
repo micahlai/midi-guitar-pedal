@@ -62,6 +62,25 @@ class ValidateActionTests(unittest.TestCase):
         self.assertTrue(action["reverse"])
         self.assertEqual(action["home_value"], 5)
 
+    def test_action_cc_selection_group(self):
+        action = validate_action(
+            effect_action(type="action_cc", selection_group=2),
+            ("action_cc",), secondary=False)
+        self.assertEqual(action["selection_group"], 2)
+        # Absent -> ungrouped (0), i.e. the momentary behavior it has always had.
+        action = validate_action(
+            effect_action(type="action_cc"), ("action_cc",), secondary=False)
+        self.assertEqual(action["selection_group"], 0)
+        for bad in (6, -1, "1", True):
+            with self.assertRaises(ValueError, msg=bad):
+                validate_action(effect_action(type="action_cc", selection_group=bad),
+                                ("action_cc",), secondary=False)
+        # Only action_cc latches; the field is not carried on other types.
+        action = validate_action(
+            effect_action(type="effect_cc", selection_group=2),
+            ("effect_cc",), secondary=False)
+        self.assertNotIn("selection_group", action)
+
     def test_action_cc_color_duration_secondary_only(self):
         raw = effect_action(type="action_cc", color_duration=2.5)
         secondary = validate_action(raw, ("action_cc",), secondary=True)

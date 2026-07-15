@@ -12,14 +12,18 @@ vacates wherever it used to be, and evicts whatever used to be there. Pure
 logic — the settings popup and the renderer both read the same list.
 """
 
-# (key, menu label) in the popup's display order.
+from logic.groups import GROUP_ITEMS
+
+# (key, menu label) in the popup's display order. The selection groups come
+# last, after the fixed items — they are the ones a player adds occasionally,
+# and there are five of them (logic/groups.py).
 HEADER_ITEMS = (
     ("patch", "Patch"),
     ("bpm", "BPM"),
     ("network", "Network status"),
     ("midi", "MIDI status"),
     ("preset", "Preset name"),
-)
+) + GROUP_ITEMS
 ITEM_KEYS = tuple(key for key, _ in HEADER_ITEMS)
 
 # Position index -> the name shown in the menu, and the switch that picks it.

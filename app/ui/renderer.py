@@ -18,7 +18,7 @@ from pathlib import Path
 from config.model import get_primary, get_secondary_action, get_slot, resolve_color
 from logic.expression import map_value
 from web.images import image_path
-from logic import header
+from logic import groups, header
 from logic.keypad import KEY_SHIFT, LEGEND_ROWS
 from hardware.constants import (DISPLAY_HEIGHT, DISPLAY_ROTATION_DEGREES,
                                 DISPLAY_WIDTH)
@@ -283,6 +283,7 @@ class UiRenderer:
             state.header_network,
             state.header_midi,
             tuple(state.config["ui"].get("header") or ()),
+            tuple(sorted(state.group_selection.items())),
             self._tempo_text(now),
             int(now / (FLICKER_PERIOD_S / 2)),
         )
@@ -532,6 +533,11 @@ class UiRenderer:
             return text, text in ("no midi connection", "…")
         if item == "preset":
             return self.state.config.get("preset_name") or "—", False
+        index = groups.key_to_index(item)
+        if index is not None:
+            # "Pad Key - C", dimmed until something in the group is pressed.
+            selection = groups.selected_label(self.state.config, self.state, index)
+            return groups.header_text(self.state.config, self.state, index), selection is None
         return "", True
 
     def _draw_error_screen(self, pygame, surface, font_big, font_small) -> None:
@@ -686,6 +692,12 @@ class UiRenderer:
         if kind == "effect_cc":
             return bool(state.effect_states.get((action["midi_channel"], action["cc_number"])))
         if kind == "action_cc":
+            # In a selection group it latches instead of being momentary: it
+            # stays lit until another member of the group is pressed.
+            index = groups.action_group(action)
+            if index is not None:
+                return groups.is_selected(state, index, state.current_menu,
+                                          button_num, role)
             if role == "secondary":
                 # Hold fires are instantaneous; the on_color shows for the
                 # slot's color_duration window set by ActionLogic.

@@ -154,6 +154,8 @@
 
   /* ---- palette tab ---- */
   .palette-grid { display: grid; grid-template-columns: repeat(5, 180px); gap: 16px; }
+  .groups-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px; max-width: 1200px; }
   .palette-grid .field input[type=color] { height: 40px; }
 
   /* ---- presets tab ---- */
@@ -229,6 +231,16 @@
     <div class="hint">Ten shared palette slots. Buttons whose colors use a palette
       slot are linked: changing the slot here recolors all of them at once.</div>
     <div class="palette-grid" id="palette-grid"></div>
+  </div>
+  <div id="view-groups" hidden>
+    <div class="hint">Five selection groups. Assign Action CC buttons to a group in the menu
+      editor and they behave like a radio set: pressing one keeps its on color lit and
+      un-lights whichever member of the group was lit before. The member that loses the
+      selection is also sent value 0, so only one member of the group is on at the rig —
+      pressing a button still sends its own note exactly as before. Put a group on the
+      header (Settings → Top display) to show its current selection as
+      “Group name - Button label”. Leave a name blank if unused.</div>
+    <div class="groups-grid" id="groups-grid"></div>
   </div>
   <div id="view-presets" hidden>
     <div class="presets" id="presets-box">loading…</div>
@@ -406,7 +418,7 @@ const TEMPLATES = {
     off_color: "#303030", on_color: "#00FF66", label: "", image_asset_id: null },
   action_cc: { type: "action_cc", midi_channel: 1, cc_number: 20,
     off_color: "#303030", on_color: "#FF6600", color_duration: 1,
-    label: "", image_asset_id: null },
+    selection_group: 0, label: "", image_asset_id: null },
   program_change: { type: "program_change", midi_channel: 1, program_number: 0,
     off_color: "#303030", on_color: "#3399FF", label: "", image_asset_id: null },
   expression_pedal: { type: "expression_pedal", midi_channel: 1, cc_number: 7,
@@ -444,6 +456,9 @@ const FIELDS = {
   action_cc: [
     ["midi_channel", "MIDI channel", "chan"], ["cc_number", "Note number", "midi7"],
     ["off_color", "Off color", "color"], ["on_color", "On color", "color"],
+    // In a group the button latches instead of being momentary, so the color
+    // duration below no longer applies to it.
+    ["selection_group", "Selection group", "group"],
     // Secondary only: how long the on color shows after the hold fires.
     ["color_duration", "On color duration (seconds)", "secs"],
   ],
@@ -530,7 +545,7 @@ function actionMeta(a) {
 
 const TABS = [
   ["overview", "Overview"], [1, "Menu 1"], [2, "Menu 2"], [3, "Menu 3"], [4, "Menu 4"],
-  ["palette", "Palette"], ["images", "Images"], ["presets", "Presets"],
+  ["palette", "Palette"], ["groups", "Groups"], ["images", "Images"], ["presets", "Presets"],
   ["global", "Settings"],
 ];
 
@@ -555,6 +570,7 @@ function switchTab(id, keepSelection) {
   $("view-overview").hidden = id !== "overview";
   $("view-menu").hidden = typeof id !== "number";
   $("view-palette").hidden = id !== "palette";
+  $("view-groups").hidden = id !== "groups";
   $("view-images").hidden = id !== "images";
   $("view-presets").hidden = id !== "presets";
   $("view-global").hidden = id !== "global";
@@ -562,6 +578,7 @@ function switchTab(id, keepSelection) {
   if (id === "overview") renderOverview();
   if (typeof id === "number") renderCards();
   if (id === "palette") renderPalette();
+  if (id === "groups") renderGroups();
   if (id === "images") renderImageLib();
   if (id === "presets") renderPresets();
 }
@@ -1020,6 +1037,9 @@ function actionForm(n, role) {
   for (const [key, name, kind] of FIELDS[action.type]) {
     if (role === "secondary" && key === "off_color") continue;
     if (role === "primary" && key === "color_duration") continue;
+    // A grouped button latches until another member of its group is pressed,
+    // so there is no on-color window to time.
+    if (key === "color_duration" && action.selection_group) continue;
     // The home value and its speed/threshold mean nothing to an effect that
     // never returns home; the on-selection speed/threshold only drive the
     // interpolate mode. Both groups appear as their owner is switched on
@@ -1043,6 +1063,22 @@ function actionForm(n, role) {
     }
     if (kind === "color") {
       pairs.appendChild(field(name, colorPicker(n, role, key, action)));
+      continue;
+    }
+    if (kind === "group") {
+      const sel = document.createElement("select");
+      const none = document.createElement("option");
+      none.value = "0"; none.textContent = "None (momentary)";
+      sel.appendChild(none);
+      for (let index = 1; index <= GROUP_COUNT; index++) {
+        const opt = document.createElement("option");
+        opt.value = String(index); opt.textContent = groupLabel(index);
+        sel.appendChild(opt);
+      }
+      sel.value = String(action[key] || 0);
+      // Joining or leaving a group shows/hides the color duration.
+      sel.onchange = () => setField(n, role, key, parseInt(sel.value, 10), true);
+      pairs.appendChild(wide(key, field(name, sel)));
       continue;
     }
     if (kind === "choice") {  // select_mode is the only one so far
@@ -1206,6 +1242,57 @@ function renderPalette() {
       savePalette({ labels });
     };
     slot.appendChild(field("Label", label));
+    grid.appendChild(slot);
+  });
+}
+
+/* ---------- groups tab ---------- */
+
+// The five selection-group slots always exist; only the name is editable.
+const GROUP_COUNT = 5;
+
+function groupNames() {
+  const names = config.selection_groups || [];
+  return Array.from({ length: GROUP_COUNT }, (_, i) => names[i] || "");
+}
+
+// What the group picker on an Action CC calls each group: its name once it has
+// one, otherwise the slot's own number so an unnamed group is still selectable.
+function groupLabel(index) {
+  return groupNames()[index - 1] || `Selection Group ${index}`;
+}
+
+function renderGroups() {
+  const grid = $("groups-grid");
+  grid.innerHTML = "";
+  groupNames().forEach((name, i) => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 24;
+    input.placeholder = "Unused";
+    input.value = name;
+    input.onchange = () => {
+      const names = groupNames();
+      names[i] = input.value.trim();
+      saveSettings({ selection_groups: names });
+    };
+    const slot = document.createElement("div");
+    slot.appendChild(field(`Selection Group ${i + 1}`, input));
+    // Which buttons are in this group, so a name is not just a name in a box.
+    const members = [];
+    for (const menu of config.menus) {
+      for (const [button, slotConfig] of Object.entries(menu.slots || {})) {
+        for (const action of [slotConfig.primary, (slotConfig.secondary || {}).action]) {
+          if (action && action.type === "action_cc" && action.selection_group === i + 1)
+            members.push(`${menu.name || "Menu " + menu.id} B${button}` +
+                         (action.label ? ` · ${action.label}` : ""));
+        }
+      }
+    }
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = members.length ? members.join(", ") : "No buttons assigned";
+    slot.appendChild(hint);
     grid.appendChild(slot);
   });
 }
@@ -1494,6 +1581,7 @@ document.addEventListener("keydown", e => {
 // several = the full path; empty = top-level key.
 const SETTING_PATHS = {
   preset_name: [],
+  selection_groups: [],
   shift_hold_seconds: ["buttons"], secondary_hold_default_seconds: ["buttons"],
   program_display_base: ["midi"], default_channel: ["midi"],
   usb_enabled: ["midi"], ble_enabled: ["midi"],
@@ -1533,9 +1621,13 @@ function bindCheck(id, key) {
   el.onchange = () => saveSettings({ [key]: el.checked });
 }
 
+// Mirrors logic/header.py: the fixed items, then the five selection groups.
+// A group shows its current selection as "Group name - Button label".
 const HEADER_ITEMS = [
   ["patch", "Patch"], ["bpm", "BPM"], ["network", "Network status"],
   ["midi", "MIDI status"], ["preset", "Preset name"],
+  ...Array.from({ length: GROUP_COUNT },
+                (_, i) => [`group${i + 1}`, `Selection Group ${i + 1}`]),
 ];
 
 function normalizeHeader(slots) {

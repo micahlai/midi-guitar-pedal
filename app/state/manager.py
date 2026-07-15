@@ -29,6 +29,12 @@ class StateManager:
         # they meet, the effect tracks the pedal and there is nothing to show
         # until another effect is selected.
         self.expression_meeting_pedal = False
+        # Selection groups (logic/groups.py): group index -> the (menu, button,
+        # role) of the action_cc last pressed in it. Display only — it latches
+        # that button's on_color and names it in the header, and never changes
+        # what gets sent. Runtime state, not config: a fresh boot has nothing
+        # selected in any group.
+        self.group_selection: dict[int, tuple[int, int, str]] = {}
         # (menu_id, button_num, "primary"|"secondary") of the active
         # expression_pedal assignment.
         self.expression_mode: tuple[int, int, str] | None = None

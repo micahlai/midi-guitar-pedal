@@ -39,7 +39,7 @@ from pathlib import Path
 from config import presets
 from config.defaults import copy_device_settings, strip_device_settings
 from config.loader import save_config
-from logic import header
+from logic import groups, header
 from web import images
 from config.model import ACTION_TYPES, PALETTE_SIZE, get_menu, iter_expression_actions
 from logic.expression import ACTION_DEFAULTS, SELECT_MODES
@@ -104,6 +104,22 @@ def _string(value, name, max_len):
     return value.strip()[:max_len]
 
 
+def _group_names(value):
+    """The 5 selection-group names (logic/groups.py). Only the name is editable
+    — the slots themselves always exist, so this is a fixed-length list."""
+    if not isinstance(value, list) or len(value) != groups.GROUP_COUNT:
+        raise ValueError(
+            f"selection_groups must be a list of {groups.GROUP_COUNT} names")
+    names = []
+    for name in value:
+        if not isinstance(name, str):
+            raise ValueError("selection group names must be strings")
+        if len(name.strip()) > 24:
+            raise ValueError("selection group names must be 24 characters or fewer")
+        names.append(name.strip())
+    return names
+
+
 def _header_slots(value):
     """The header's 5 positions (logic/header.py). Enforced here, not just in
     the browser: one item per position, one position per item, so an API caller
@@ -160,6 +176,15 @@ def validate_action(raw, allowed_types, secondary: bool, pc_base: int = 0) -> di
 
     if action_type in ("effect_cc", "action_cc"):
         action["cc_number"] = _midi7(raw.get("cc_number"), "cc_number")
+        if action_type == "action_cc":
+            # 0/absent = ungrouped (momentary, as before); 1-5 = latches with
+            # the other members of that selection group. Display only.
+            index = raw.get("selection_group", 0) or 0
+            if (isinstance(index, bool) or not isinstance(index, int)
+                    or not 0 <= index <= groups.GROUP_COUNT):
+                raise ValueError(
+                    f"selection_group must be 0-{groups.GROUP_COUNT}")
+            action["selection_group"] = index
         if action_type == "action_cc" and secondary:
             # How long the on_color shows after the hold fires the secondary
             # (there is no "held" period to display — the fire IS the hold).
@@ -388,6 +413,10 @@ def apply_settings(config: dict, payload: dict) -> dict:
     if "preset_name" in payload:
         updates["preset_name"] = (
             config, "preset_name", presets.validate_preset_name(payload["preset_name"]),
+        )
+    if "selection_groups" in payload:
+        updates["selection_groups"] = (
+            config, "selection_groups", _group_names(payload["selection_groups"]),
         )
 
     # --- device-scoped ------------------------------------------------------
